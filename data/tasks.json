@@ -1,0 +1,72 @@
+{
+  "xai_level_0": [],
+  "xai_level_1": [],
+  "xai_level_0_1": [
+    {
+      "id": "task_20260207_213009_0",
+      "title": "My Simple Generation",
+      "model": "HuggingFaceTB/SmolLM-135M-Instruct",
+      "treatment": "",
+      "result": {},
+      "created_at": "2026-02-07T21:30:09.277374",
+      "xai_level": "0.1"
+    }
+  ],
+  "xai_level_1_2": [],
+  "xai_level_2_1": [],
+  "xai_level_0_2": [
+    {
+      "id": "task_20260207_211859_0",
+      "title": "Task",
+      "model": "tiny-gpt2",
+      "treatment": "",
+      "result": {},
+      "created_at": "2026-02-07T21:18:59.127414",
+      "xai_level": "0.2"
+    }
+  ],
+  "xai_level_0_2_1": [],
+  "xai_level_0_2_5": [],
+  "xai_level_0_1_1": [
+    {
+      "id": "task_20260207_222259_1",
+      "title": "Completion",
+      "model": "HuggingFaceTB/SmolLM-135M-Instruct",
+      "treatment": "",
+      "result": {
+        "ok": true,
+        "generated_text": "\"\"\"\n    if n == 0:\n        return 0\n    if n == 1:\n        return 1\n    def _helper(arr, n):\n        if n == 1:\n            return [arr[0]]\n        else:\n            return helper(arr[0], n - 1) + helper(arr[n - 1], n)\n\n    return _helper(arr, n)\n```",
+        "input_string": "Hello",
+        "max_new_tokens": 256,
+        "model": "HuggingFaceTB/SmolLM-135M-Instruct",
+        "status": "ok",
+        "temperature": 0.7,
+        "top_k": 50,
+        "top_p": 1,
+        "treatment": ""
+      },
+      "created_at": "2026-02-07T22:22:59.023755",
+      "xai_level": "0.1.1"
+    },
+    {
+      "id": "task_20260207_222332_1",
+      "title": "Task 2",
+      "model": "google/gemma-3-270m-it",
+      "treatment": "",
+      "result": {
+        "ok": true,
+        "generated_text": "! I'm thrilled to be here. How can I help you today?\n\nI'm here to listen and to learn. I'm eager to connect and understand your needs. Let's begin!\n\nWhat are you interested in?\n\n\n\n\nतुम्ही मला काहीतरी विचारू शकता का?\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n चांगलं वाटेल की, मला मदत करायची आहे. होत नाहीयेस, मी तुम्हाला काही प्रश्न विचारू शकतो.\n\n\n\n\n\n चांगलं वाटेल की, मला मदत करायची आहे.",
+        "input_string": "Hello",
+        "max_new_tokens": 256,
+        "model": "google/gemma-3-270m-it",
+        "status": "ok",
+        "temperature": 0.7,
+        "top_k": 50,
+        "top_p": 1,
+        "treatment": ""
+      },
+      "created_at": "2026-02-07T22:23:32.191308",
+      "xai_level": "0.1.1"
+    }
+  ]
+}

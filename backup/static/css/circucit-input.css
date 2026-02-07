@@ -1,0 +1,294 @@
+/* Circuit Panel: layout + input + result (circucit-input.css) */
+
+main.main-circuit {
+  grid-template-columns: 1fr;
+  overflow: auto;
+}
+
+.circuit-input-card {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.circuit-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.circuit-mode-select {
+  min-width: 220px;
+  padding: 8px 12px;
+}
+.circuit-input-box-container {
+  min-height: 140px;
+  padding: 12px 0;
+}
+.circuit-input-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.circuit-input-box--simple,
+.circuit-input-box--generate {
+  gap: 8px;
+}
+.circuit-input-box--user_qa {
+  gap: 16px;
+}
+.circuit-input-subbox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid #2a2f42;
+}
+.circuit-input-subbox:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.circuit-input-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.circuit-input-block + .circuit-actions {
+  margin-top: 8px;
+}
+.circuit-prompt-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.circuit-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.circuit-prompt-input {
+  width: 100%;
+  min-height: 80px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  font-family: inherit;
+  background: #1a1d2e;
+  border: 1px solid #2a2f42;
+  border-radius: 8px;
+  color: var(--text);
+  resize: vertical;
+  transition: border-color 0.15s ease;
+}
+.circuit-prompt-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.circuit-prompt-input::placeholder {
+  color: var(--muted);
+}
+.circuit-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 4px;
+}
+.circuit-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ----- 결과 카드 ----- */
+.circuit-result-card {
+  min-height: 200px;
+}
+.circuit-next-token-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid #2a2f42;
+}
+.circuit-next-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.circuit-next-value {
+  font-family: ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+}
+/* ----- Circuit heatmap (Neuropedia 스타일: X=토큰, Y=레이어) ----- */
+.circuit-heatmap-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+.circuit-heatmap-figure {
+  margin: 0;
+  --circuit-cols: 2;
+  --circuit-rows: 2;
+}
+.circuit-heatmap-grid {
+  display: grid;
+  grid-template-columns: auto repeat(calc(var(--circuit-cols) - 1), minmax(14px, 1fr));
+  grid-template-rows: auto repeat(calc(var(--circuit-rows) - 1), 22px);
+  gap: 2px;
+  min-height: 120px;
+  align-items: stretch;
+}
+.circuit-heatmap-corner {
+  background: #1a1d2e;
+  border: 1px solid #2a2f42;
+  border-radius: 4px;
+  min-width: 32px;
+  min-height: 28px;
+}
+.circuit-heatmap-x-label {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 4px 6px;
+  background: #1a1d2e;
+  border: 1px solid #2a2f42;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  word-break: break-all;
+}
+.circuit-heatmap-y-label {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 8px;
+  background: #1a1d2e;
+  border: 1px solid #2a2f42;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+.circuit-heatmap-cell {
+  min-width: 8px;
+  min-height: 18px;
+  border-radius: 3px;
+  background: #2a2f42;
+  transition: background 0.1s ease, filter 0.1s ease;
+}
+.circuit-heatmap-cell:hover {
+  filter: brightness(1.2);
+}
+
+/* ----- 뷰 전환 탭 ----- */
+.circuit-view-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 10px;
+}
+.circuit-view-tab {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: #1a1d2e;
+  border: 1px solid #2a2f42;
+  border-right-width: 0;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.circuit-view-tab:last-child {
+  border-right-width: 1px;
+  border-radius: 0 6px 6px 0;
+}
+.circuit-view-tab:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.circuit-view-tab:hover {
+  color: var(--text);
+  background: #222638;
+}
+.circuit-view-tab.active {
+  color: var(--accent);
+  background: #1a1d2e;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.circuit-heatmap-container.hidden,
+.circuit-graph-container.hidden {
+  display: none !important;
+}
+
+/* ----- Circuit graph (Neuronpedia 포맷: L0/L1, 작은 원 노드, 초록 circuit / 회색 일반선) ----- */
+.circuit-graph-container {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  overflow: auto;
+  min-height: 200px;
+}
+.circuit-graph-svg {
+  display: block;
+  min-height: 180px;
+}
+.circuit-edge {
+  fill: none;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.circuit-edge--strong {
+  stroke: #22c55e;
+  stroke-width: 2.5px;
+  stroke-opacity: 0.9;
+}
+.circuit-edge--strong:hover {
+  stroke-opacity: 1;
+}
+.circuit-edge--weak {
+  stroke: #64748b;
+  stroke-width: 0.7px;
+  stroke-opacity: 0.5;
+}
+.circuit-edge--weak:hover {
+  stroke-opacity: 0.8;
+}
+.circuit-nodes .circuit-node {
+  fill: #f1f5f9;
+  stroke: #475569;
+  stroke-width: 1px;
+  transition: fill 0.15s ease, stroke 0.15s ease;
+}
+.circuit-nodes .circuit-node:hover {
+  fill: #e2e8f0;
+  stroke: #334155;
+}
+
+/* Circuit 그래프 내 토큰/레이어 텍스트 */
+.circuit-graph-labels .circuit-layer-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-family: inherit;
+}
+.circuit-graph-labels .circuit-token-label {
+  fill: var(--muted);
+  font-size: 10px;
+  font-family: inherit;
+}
+
+/* Run 후 위쪽 입력 패널 가림 효과 (결과에 집중, 호버 시 다시 선명) */
+body.circuit-has-result .main-circuit > .card:first-of-type {
+  opacity: 0.5;
+  filter: blur(2px);
+  transition: opacity 0.25s ease, filter 0.25s ease;
+}
+body.circuit-has-result .main-circuit > .card:first-of-type:hover {
+  opacity: 1;
+  filter: blur(0);
+}

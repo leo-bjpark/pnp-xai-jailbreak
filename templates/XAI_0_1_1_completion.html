@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ task.title }} - PnP-XAI-LLM</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem('pnp-xai-theme')||'light';</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide.css') }}" />
+</head>
+<body>
+  <header class="app-title-bar">
+    <h1>PnP-XAI-LLM — {{ task.title }}</h1>
+    <div class="app-title-bar-right">
+      <div class="json-wrap">
+        <button type="button" class="btn-json" title="Hover for Export/Import">Json</button>
+        <div class="json-dropdown" id="json-dropdown">
+          <a href="/api/memory/export" class="json-option">Export</a>
+          <button type="button" class="json-option" id="btn-import">Import</button>
+        </div>
+      </div>
+      <input type="file" id="import-file-input" accept=".json" hidden />
+      <button type="button" class="theme-toggle" id="theme-toggle" title="Toggle theme (Sun: White, Moon: Black)" aria-label="Toggle theme">
+        <span class="theme-icon theme-sun" aria-hidden="true">☀</span>
+        <span class="theme-icon theme-moon" aria-hidden="true">🌙</span>
+      </button>
+      <div class="app-title-bar-meta">
+        <span>version 0.1</span>
+        <span>(c) KAIST-SAIL</span>
+      </div>
+      <button type="button" class="btn-right-panel" id="btn-right-panel" title="Toggle right panel" aria-label="Toggle panel">
+        <svg class="icon-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="main-layout">
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="create-task-wrap">
+          <a href="/" class="btn-create-task" title="Start new session">Create TASK</a>
+          <div class="create-task-dropdown" id="create-task-dropdown">
+            {% for level_num, items in (xai_level_grouped or {}).items() %}
+            <div class="create-task-level-group">
+              <div class="create-task-level-header">Level {{ level_num }}</div>
+              <div class="create-task-rows">
+                {% for level, name in items %}
+                <a href="/?create={{ level }}" class="create-task-option create-task-row">
+                  <span class="create-task-num">{{ level }}</span>
+                  <span class="create-task-desc">{{ name }}</span>
+                </a>
+                {% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Loaded Model</div>
+        <div class="sidebar-model-controls">
+          <select id="sidebar-model" class="sidebar-select">
+            {% for m in models %}
+            <option value="{{ m }}" {% if task.model == m %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="btn-load-model" id="btn-load-model">Load</button>
+        </div>
+        <div class="loaded-model-display {% if task.model %}has-model{% endif %}" id="loaded-model-display">
+          <span id="loaded-model-text">{{ task.model or '—' }}</span>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Treatments</div>
+        <input type="text" id="sidebar-treatment" class="sidebar-input" placeholder="Ex) LoRA, Deactivate Features" value="{{ task.treatment or '' }}" />
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Created Task Panels</div>
+        <ul class="task-panel-list" id="task-panel-list">
+          {% for level_key, items in tasks.items() if items %}
+          <li class="task-panel-group">
+            <div class="task-panel-group-title">{{ level_key }}</div>
+            <ul class="task-panel-sublist">
+              {% for t in items %}
+              <li class="task-panel-item {% if t.id == task.id %}active{% endif %}" data-task-id="{{ t.id }}" data-level="{{ level_key }}">
+                <a href="/task/{{ t.id }}" class="task-panel-item-link">{{ t.title }}</a>
+                <button type="button" class="task-panel-delete" data-task-id="{{ t.id }}" title="Delete">×</button>
+              </li>
+              {% endfor %}
+            </ul>
+          </li>
+          {% else %}
+          <li class="task-panel-empty">No tasks created yet.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </aside>
+
+    <main class="content-area">
+      <div class="content-toolbar">
+        <button type="button" class="btn-run" id="btn-run">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          RUN
+        </button>
+        <span id="generation-status" class="generation-status" aria-live="polite"></span>
+        <button type="button" class="input-setting-trigger" id="input-setting-trigger" title="테스크, 모델, Treatment, 이름 정보" data-task-title="{{ task.title or '—' }}" data-task-model="{{ task.model or '' }}" data-task-treatment="{{ task.treatment or '' }}">
+          {{ task.title or '—' }} · {{ task.model or '—' }} · {{ task.treatment or 'None' }} · {{ task.title or '—' }}
+        </button>
+      </div>
+
+      <div class="input-setting-panel" id="input-setting-panel">
+        <div class="input-setting-header">{{ task.xai_level or '0.1.1' }} — {{ task.title }} (task-specific input)</div>
+        <div class="input-setting-body" id="input-setting-body">
+          <p class="input-setting-hint">Completion: set generation parameters and input prompt. RUN uses the loaded model to generate.</p>
+          <div class="input-setting-form input-setting-form-row">
+            <div class="input-setting-cell">
+              <label for="input-completion-temperature">Temperature</label>
+              <input type="number" id="input-completion-temperature" name="temperature" data-task-input="temperature" class="input-setting-field" min="0" max="2" step="0.1" value="{{ (task.result or {}).get('temperature', 0.7) }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-completion-max-new-tokens">Max new tokens</label>
+              <input type="number" id="input-completion-max-new-tokens" name="max_new_tokens" data-task-input="max_new_tokens" class="input-setting-field" min="1" max="4096" step="1" value="{{ (task.result or {}).get('max_new_tokens', 256) }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-completion-top-p">Top-P</label>
+              <input type="number" id="input-completion-top-p" name="top_p" data-task-input="top_p" class="input-setting-field" min="0" max="1" step="0.05" value="{{ (task.result or {}).get('top_p', 1.0) }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-completion-top-k">Top-K</label>
+              <input type="number" id="input-completion-top-k" name="top_k" data-task-input="top_k" class="input-setting-field" min="0" max="1000" step="1" value="{{ (task.result or {}).get('top_k', 50) }}" />
+            </div>
+            <div class="input-setting-cell input-string-cell">
+              <label for="input-completion-string">Input String</label>
+              <div class="input-string-trigger" id="input-string-trigger" role="button" tabindex="0" title="Click for multi-line editor">Enter prompt...</div>
+              <textarea id="input-completion-string" name="input_string" data-task-input="input_string" class="input-setting-field input-string-textarea" rows="8" placeholder="Enter prompt for completion..." style="display:none;">{{ (task.result or {}).get('input_string', '') }}</textarea>
+              <div class="input-string-backdrop" id="input-string-backdrop"></div>
+              <div class="input-string-popover" id="input-string-popover">
+                <textarea id="input-string-popover-textarea" class="input-string-popover-textarea" rows="10" placeholder="Enter prompt for completion..."></textarea>
+                <button type="button" class="input-string-popover-close" id="input-string-popover-close">Done</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="results-area">
+        {% if task.result and (task.result or {}).get('generated_text') is not none %}
+        <div class="results-content visible" id="results-content">
+          <div class="results-completion-wrap">
+            <h3>Generated</h3>
+            <pre class="results-completion-text">{{ task.result.generated_text }}</pre>
+            <details class="results-completion-meta">
+              <summary>Parameters &amp; full result</summary>
+              <pre class="results-json">{{ task.result | tojson(indent=2) }}</pre>
+            </details>
+          </div>
+        </div>
+        <div class="results-placeholder hidden" id="results-placeholder"></div>
+        {% elif task.result %}
+        <div class="results-content visible" id="results-content">
+          <div style="padding: 16px;">
+            <h3 style="margin-top:0;">{{ task.title }}</h3>
+            <pre style="background: var(--panel); padding: 12px; border-radius: 6px; overflow: auto; font-size: 12px;">{{ task.result | tojson(indent=2) }}</pre>
+          </div>
+        </div>
+        <div class="results-placeholder hidden" id="results-placeholder"></div>
+        {% else %}
+        <div class="results-placeholder" id="results-placeholder">
+          <span class="brand-title">PnP-XAI-LLM</span>
+          <ul class="feature-list">
+            <li>Load a model, set Temperature / Max new tokens / Top-P / Top-K and Input String, then RUN.</li>
+            <li></li>
+            <li></li>
+          </ul>
+        </div>
+        <div class="results-content" id="results-content"></div>
+        {% endif %}
+      </div>
+    </main>
+  </div>
+  <!-- Modal: confirm model load when session mismatch -->
+  <div class="modal-overlay" id="modal-confirm-load">
+    <div class="modal-dialog">
+      <h3>Confirm Model Load</h3>
+      <p id="modal-message">Loaded Model + Treatment does not match the current session. Load the model with this setting?</p>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-cancel" id="modal-cancel">Cancel</button>
+        <button type="button" class="modal-btn-confirm" id="modal-confirm">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <script>window.PNP_CURRENT_TASK_ID = {{ task.id | tojson }}; window.PNP_CURRENT_TASK_LEVEL = {{ task.xai_level | tojson }};</script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script>
+  (function() {
+    var realEl = document.getElementById("input-completion-string");
+    var trigger = document.getElementById("input-string-trigger");
+    var popover = document.getElementById("input-string-popover");
+    var backdrop = document.getElementById("input-string-backdrop");
+    var popoverTa = document.getElementById("input-string-popover-textarea");
+    var closeBtn = document.getElementById("input-string-popover-close");
+    function updateTriggerText() {
+      if (!trigger) return;
+      var v = (realEl && realEl.value) ? realEl.value.trim() : "";
+      trigger.textContent = v || "Enter prompt...";
+    }
+    function openPopover() {
+      if (popoverTa && realEl) popoverTa.value = realEl.value || "";
+      if (popover) popover.classList.add("visible");
+      if (backdrop) backdrop.classList.add("visible");
+      if (popoverTa) { popoverTa.focus(); popoverTa.select(); }
+    }
+    function closePopover() {
+      if (popover) popover.classList.remove("visible");
+      if (backdrop) backdrop.classList.remove("visible");
+      if (realEl && popoverTa) realEl.value = popoverTa.value || "";
+      updateTriggerText();
+    }
+    if (trigger) {
+      trigger.addEventListener("click", openPopover);
+      trigger.addEventListener("keydown", function(e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPopover(); } });
+    }
+    if (closeBtn) closeBtn.addEventListener("click", closePopover);
+    if (backdrop) backdrop.addEventListener("click", closePopover);
+    document.addEventListener("keydown", function(e) { if (e.key === "Escape" && popover && popover.classList.contains("visible")) { e.preventDefault(); closePopover(); } });
+    updateTriggerText();
+  })();
+  </script>
+</body>
+</html>

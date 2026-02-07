@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PnP-XAI-LLM</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/styles.css') }}"
+    />
+  </head>
+  <body>
+    <nav class="tab-bar" aria-label="Page navigation">
+      <div class="tab-bar-tabs">
+        <a href="/" class="tab-link {{ 'active' if active_tab == 'main' else '' }}">Main</a>
+        <a href="/model_load" class="tab-link {{ 'active' if active_tab == 'model_load' else '' }}">Model Load</a>
+        <a href="/src_destination" class="tab-link {{ 'active' if active_tab == 'src_destination' else '' }}">SRC / Destination</a>
+        <a href="/circuit_panel" class="tab-link {{ 'active' if active_tab == 'circuit_panel' else '' }}">Circuit</a>
+        <a href="/computation_test" class="tab-link {{ 'active' if active_tab == 'computation_test' else '' }}">Computation Test</a>
+      </div>
+      <div class="tab-bar-actions">
+        <span class="tab-bar-loaded">Loaded: <span id="global-loaded-model">—</span></span>
+        <div class="toolbar-group">
+          <span class="toolbar-label">Model</span>
+          <select id="model" class="toolbar-select">
+            {% for m in models %}
+            <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" id="load-model" class="toolbar-button">Load</button>
+        </div>
+      </div>
+    </nav>
+    <main class="main-landing">
+      <div class="landing-content">
+        <h1 class="landing-title">PnP-XAI-LLM</h1>
+        <p class="landing-purpose">
+          Layer × Head Attention 시각화. 모델을 선택해 로드한 뒤 토큰 간 SRC → DST attention을 분석합니다.
+        </p>
+        <div class="landing-model-row">
+          <input
+            id="model-search"
+            type="text"
+            list="model-list"
+            class="landing-model-input"
+            placeholder="모델 이름 검색..."
+            autocomplete="off"
+          />
+          <datalist id="model-list"></datalist>
+          <button type="button" id="model-load-btn" class="landing-model-btn">Load</button>
+        </div>
+        <div id="model-status-root" class="model-status-card" aria-live="polite">
+          <div id="model-status-placeholder" class="model-status-placeholder">
+            모델을 선택하고 Load를 누르면 상태가 표시됩니다.
+          </div>
+          <div id="model-status-body" class="model-status-body" hidden>
+            <table class="model-status-table">
+              <tr><th>Name</th><td id="status-name"></td></tr>
+              <tr><th>Number of layers</th><td id="status-layers"></td></tr>
+              <tr><th>Number of heads</th><td id="status-heads"></td></tr>
+              <tr><th>Parameters</th><td id="status-params"></td></tr>
+              <tr><th>Device status</th><td id="status-devices"></td></tr>
+            </table>
+          </div>
+          <div id="model-status-error" class="model-status-error" hidden></div>
+        </div>
+      </div>
+    </main>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  </body>
+</html>

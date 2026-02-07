@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PnP-XAI-LLM</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem('pnp-xai-theme')||'light';</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide.css') }}" />
+</head>
+<body>
+  <!-- Title bar -->
+  <header class="app-title-bar">
+    <h1>PnP-XAI-LLM</h1>
+    <div class="app-title-bar-right">
+      <div class="json-wrap">
+        <button type="button" class="btn-json" id="btn-json" title="Hover for Export/Import">Json</button>
+        <div class="json-dropdown" id="json-dropdown">
+          <button type="button" class="json-option" id="btn-export">Export</button>
+          <button type="button" class="json-option" id="btn-import">Import</button>
+        </div>
+      </div>
+      <input type="file" id="import-file-input" accept=".json" hidden />
+      <button type="button" class="theme-toggle" id="theme-toggle" title="Toggle theme (Sun: White, Moon: Black)" aria-label="Toggle theme">
+        <span class="theme-icon theme-sun" aria-hidden="true">☀</span>
+        <span class="theme-icon theme-moon" aria-hidden="true">🌙</span>
+      </button>
+      <div class="app-title-bar-meta">
+        <span>Version 0.1</span>
+        <span>(c) KAIST-SAIL</span>
+      </div>
+      <button type="button" class="btn-right-panel" id="btn-right-panel" title="Toggle right panel" aria-label="Toggle panel">
+        <svg class="icon-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="main-layout">
+    <!-- Left sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="create-task-wrap">
+          <button type="button" class="btn-create-task" id="btn-create-task" title="Hover to choose XAI level">Create XAI</button>
+          <div class="create-task-dropdown" id="create-task-dropdown">
+            {% for level_num, items in (xai_level_grouped or {}).items() %}
+            <div class="create-task-level-group">
+              <div class="create-task-level-header">Level {{ level_num }}</div>
+              <div class="create-task-rows">
+                {% for level, name in items %}
+                <button type="button" class="create-task-option create-task-row" data-level="{{ level }}" data-name="{{ name }}">
+                  <span class="create-task-num">{{ level }}</span>
+                  <span class="create-task-desc">{{ name }}</span>
+                </button>
+                {% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section" data-section="loaded-model">
+        <div class="sidebar-section-title">
+          <span class="sidebar-section-chevron" aria-hidden="true">▼</span>
+          <span>Loaded Model</span>
+        </div>
+        <div class="sidebar-section-body">
+        <div class="sidebar-model-controls">
+          <select id="sidebar-model" class="sidebar-select">
+            {% for m in models %}
+            <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="btn-load-model" id="btn-load-model">Load</button>
+        </div>
+        <div class="loaded-model-display" id="loaded-model-display">
+          <span id="loaded-model-text">—</span>
+        </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section" data-section="treatments">
+        <div class="sidebar-section-title">
+          <span class="sidebar-section-chevron" aria-hidden="true">▼</span>
+          <span>Treatments</span>
+        </div>
+        <div class="sidebar-section-body">
+        <input type="text" id="sidebar-treatment" class="sidebar-input" placeholder="Ex) LoRA, Deactivate Features" />
+        </div>
+      </div>
+
+      <div class="sidebar-section" data-section="task-panels">
+        <div class="sidebar-section-title">
+          <span class="sidebar-section-chevron" aria-hidden="true">▼</span>
+          <span>Created Task Panels</span>
+        </div>
+        <div class="sidebar-section-body">
+        <ul class="task-panel-list" id="task-panel-list">
+          {% for level, items in tasks.items() if items %}
+          <li class="task-panel-group">
+            <div class="task-panel-group-title">
+              <span class="task-panel-chevron" aria-hidden="true">▼</span>
+              <span class="task-panel-group-label">{% set level_key = level.replace('xai_level_', '').replace('_', '.') %}{{ level_key }} — {{ xai_level_names.get(level_key, level) }}</span>
+            </div>
+            <ul class="task-panel-sublist">
+              {% for t in items %}
+              <li class="task-panel-item" data-task-id="{{ t.id }}" data-level="{{ level }}">
+                <a href="/task/{{ t.id }}" class="task-panel-item-link">{{ t.title }}</a>
+                <button type="button" class="task-panel-delete" data-task-id="{{ t.id }}" title="Delete">×</button>
+              </li>
+              {% endfor %}
+            </ul>
+          </li>
+          {% else %}
+          <li class="task-panel-empty">No tasks created yet.</li>
+          {% endfor %}
+        </ul>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right content area -->
+    <main class="content-area">
+      <div class="content-toolbar">
+        <button type="button" class="btn-run" id="btn-run">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          RUN
+        </button>
+        <span id="generation-status" class="generation-status" aria-live="polite"></span>
+        <button type="button" class="input-setting-trigger" id="input-setting-trigger" title="테스크, 모델, Treatment, 이름 정보" data-task-title="" data-task-model="" data-task-treatment="">
+          — · — · None · —
+        </button>
+      </div>
+
+      <div class="input-setting-panel" id="input-setting-panel">
+        <div class="input-setting-header">Task-specific input (design per task type)</div>
+        <div class="input-setting-body" id="input-setting-body">
+          <p class="input-setting-hint">Configure inputs tailored to the selected task. Content varies by XAI level / task type.</p>
+        </div>
+      </div>
+
+      <div class="results-area">
+        <div class="results-placeholder" id="results-placeholder">
+          <span class="brand-title">PnP-XAI-LLM</span>
+          <ul class="feature-list">
+            <li></li>
+            <li></li>
+            <li></li>
+          </ul>
+        </div>
+        <div class="results-content" id="results-content"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal: full-screen task name input -->
+  <div class="modal-overlay modal-fullscreen" id="modal-create-task-name">
+    <div class="modal-create-task-inner">
+      <h2 class="modal-create-task-title">Enter task name</h2>
+      <input type="text" id="create-task-name-input" class="create-task-name-input" placeholder="Task name" />
+      <div class="modal-create-task-actions">
+        <button type="button" class="modal-btn-cancel" id="create-task-cancel">Cancel</button>
+        <button type="button" class="modal-btn-confirm" id="create-task-confirm">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: confirm model load when session mismatch -->
+  <div class="modal-overlay" id="modal-confirm-load">
+    <div class="modal-dialog">
+      <h3>Confirm Model Load</h3>
+      <p id="modal-message">
+        Loaded Model + Treatment does not match the current session.<br />
+        Load the model with this setting?
+      </p>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-cancel" id="modal-cancel">Cancel</button>
+        <button type="button" class="modal-btn-confirm" id="modal-confirm">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
