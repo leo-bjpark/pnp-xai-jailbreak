@@ -7,13 +7,8 @@ import uuid
 
 from flask import Blueprint, jsonify, request
 
-from utils import (
-    chat_completion,
-    get_cache_token_count,
-    get_config_models,
-    get_model_status,
-    load_llm,
-)
+from utils import get_config_models, get_model_status, load_llm
+from python.model_generation import chat_completion, get_cache_token_count
 
 bp = Blueprint("model_load", __name__, url_prefix="/api")
 

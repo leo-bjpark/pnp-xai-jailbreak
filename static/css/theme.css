@@ -1,50 +1,83 @@
 :root,
 [data-theme="light"] {
-  --bg: #f8f9fa;
-  --panel: #ffffff;
-  --sidebar: #f0f2f5;
-  --accent: #6a00e2;
-  --accent-hover: #006cbd;
-  --accent-green: #2dc464;
-  --accent-green-hover: #2dc464;
-  --accent-orange: #f97316;
-  --text: #1a1a1a;
-  --muted: #32006b;
-  --border: #dee2e6;
-  --hover: #e9ecef;
-  --active-bg: rgba(0, 120, 212, 0.12);
-  --input-bg: #ffffff;
-  --run-button: #a5fa06;
-  --run-button-hover: #009b2fb7;
-  --create-xai-button: #82dcff;
-  --create-xai-button-hover: #82dcff;
-  --load-model-button: #82dcff;
-  --load-model-button-hover: #82dcff;
-  --section-title: #32006b;
-  --sidebar-section-title-hover: #32006b;
+  /* Base */
+  --bg: #FAFAF8;
+  --panel: #F1EFEA;
+  --sidebar: #EBE7DF;
+
+  /* Text */
+  --text: #1E2329;
+  --text-secondary: #FAFAF8;
+  --muted: #9AA0A6;
+
+  /* Borders */
+  --border: #D6D1C8;
+
+  /* 🔥 Brand Axis */
+  --brand: #1e299c;
+  --brand-hover: #091594;
+
+  /* Buttons */
+  --run-button: var(--brand);
+  --run-button-hover: var(--brand-hover);
+
+  --create-xai-button: #2E3440;
+  --create-xai-button-hover: #1F242D;
+
+  --load-model-button: #2E3440;
+  --load-model-button-hover: #1F242D;
+
+  /* Accent */
+  --accent: #8C1D18;
+
+  /* Interaction */
+  --hover: #E4E1DA;
+  --active-bg: #D8D4CB;
+
+  /* Titles */
+  --section-title: #1E2329;
+  --sidebar-section-title-hover: #000000;
 }
 
+
+
 [data-theme="dark"] {
-  --bg: #0f111a;
-  --panel: #161a2b;
-  --sidebar: #1e2232;
-  --accent: #9d47ff;
-  --accent-hover: #90ffb1;
-  --accent-green: #7bd39b;
-  --accent-green-hover: #7bd39b;
-  --accent-orange: #f97316;
-  --text: #e6e8f0;
-  --muted: #9aa1b5;
-  --border: #2a2f42;
-  --hover: #252938;
-  --active-bg: rgba(97, 218, 251, 0.15);
-  --input-bg: #1a1d2e;
-  --create-xai-button: #1493fa;
-  --create-xai-button-hover: #1493fa;
-  --run-button: #00a10d;
-  --run-button-hover: #00a10db6;
-  --load-model-button: #1493fa;
-  --load-model-button-hover: #1493fa;
-  --section-title: #ffffff; 
-  --sidebar-section-title-hover: #ffffff;
+  /* Base */
+  --bg: #0B0D12;
+  --panel: #12151C;
+  --sidebar: #0E1118;
+
+  /* Text */
+  --text: #F5F7FA;
+  --text-secondary: #C7CBD6;
+  --muted: #8B90A0;
+
+  /* Borders */
+  --border: #1E2233;
+
+  /* 🔥 Brand Axis (Authority) */
+  --brand: #1e299c;
+  --brand-hover: #091594;
+
+  /* Buttons */
+  --run-button: var(--brand);
+  --run-button-hover: var(--brand-hover);
+
+  --create-xai-button: #2A2F44;
+  --create-xai-button-hover: #343A55;
+
+  --load-model-button: #2A2F44;
+  --load-model-button-hover: #343A55;
+
+  /* Accent (limited use) */
+  --accent: #E2B8B5;
+  --accent-hover: #F0C9C6;
+
+  /* Interaction */
+  --hover: #1A1E30;
+  --active-bg: #222744;
+
+  /* Titles */
+  --section-title: #FFFFFF;
+  --sidebar-section-title-hover: #FFFFFF;
 }

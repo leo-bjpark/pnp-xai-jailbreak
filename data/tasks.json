@@ -29,64 +29,238 @@
   "xai_level_0_2_5": [],
   "xai_level_0_1_1": [
     {
-      "id": "task_20260207_222259_1",
-      "title": "Completion",
-      "model": "HuggingFaceTB/SmolLM-135M-Instruct",
+      "id": "task_20260208_200726_0",
+      "title": "Temp",
+      "model": "",
       "treatment": "",
-      "result": {
-        "ok": true,
-        "generated_text": "\"\"\"\n    if n == 0:\n        return 0\n    if n == 1:\n        return 1\n    def _helper(arr, n):\n        if n == 1:\n            return [arr[0]]\n        else:\n            return helper(arr[0], n - 1) + helper(arr[n - 1], n)\n\n    return _helper(arr, n)\n```",
-        "input_string": "Hello",
-        "max_new_tokens": 256,
-        "model": "HuggingFaceTB/SmolLM-135M-Instruct",
-        "status": "ok",
-        "temperature": 0.7,
-        "top_k": 50,
-        "top_p": 1,
-        "treatment": ""
-      },
-      "created_at": "2026-02-07T22:22:59.023755",
+      "result": {},
+      "created_at": "2026-02-08T20:07:26.133305",
       "xai_level": "0.1.1"
-    },
+    }
+  ],
+  "xai_level_0_1_2": [
     {
-      "id": "task_20260207_222332_1",
-      "title": "Task 2",
+      "id": "task_20260208_200614_0",
+      "title": "Test",
       "model": "google/gemma-3-270m-it",
       "treatment": "",
       "result": {
         "ok": true,
-        "generated_text": "! I'm thrilled to be here. How can I help you today?\n\nI'm here to listen and to learn. I'm eager to connect and understand your needs. Let's begin!\n\nWhat are you interested in?\n\n\n\n\nतुम्ही मला काहीतरी विचारू शकता का?\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n चांगलं वाटेल की, मला मदत करायची आहे. होत नाहीयेस, मी तुम्हाला काही प्रश्न विचारू शकतो.\n\n\n\n\n\n चांगलं वाटेल की, मला मदत करायची आहे.",
-        "input_string": "Hello",
+        "cache_message_count": 13,
+        "conversation_id": "76ff8c29-4334-4947-a997-8f30cae68176",
+        "conversation_list": {
+          "instruction": "You are a helpful assistant.",
+          "messages": [
+            {
+              "content": "How are you?",
+              "role": "user"
+            },
+            {
+              "content": "I am doing well, thank you for asking! How are you today?\n\n\n शुभेच्छा!",
+              "role": "ai"
+            },
+            {
+              "content": "Ok... That is interesting.",
+              "role": "user"
+            },
+            {
+              "content": "You're welcome! I'm glad I could help. What can I do for you today?",
+              "role": "ai"
+            },
+            {
+              "content": "Nothing please.",
+              "role": "user"
+            },
+            {
+              "content": "No problem at all! I'm happy to assist. How can I help you today?",
+              "role": "ai"
+            },
+            {
+              "content": "Can I continue?",
+              "role": "user"
+            },
+            {
+              "content": "Yes, please! I'm ready.\n डीब\n\n\n\n\n\n\n सी",
+              "role": "ai"
+            },
+            {
+              "content": "I'm working...",
+              "role": "user"
+            },
+            {
+              "content": "Okay! I'm ready for you. What's the next step?",
+              "role": "ai"
+            },
+            {
+              "content": "Don't you know?",
+              "role": "user"
+            },
+            {
+              "content": "Yes, I know! What's on your mind?ेलैल",
+              "role": "ai"
+            }
+          ]
+        },
+        "generated_text": "Yes, I know! What's on your mind?ेलैल",
+        "generated_tokens": 14,
+        "input_tokens": 182,
         "max_new_tokens": 256,
         "model": "google/gemma-3-270m-it",
         "status": "ok",
         "temperature": 0.7,
         "top_k": 50,
         "top_p": 1,
-        "treatment": ""
+        "treatment": "",
+        "cumulative_generated_tokens": 102,
+        "system_instruction": "You are a helpful assistant."
       },
-      "created_at": "2026-02-07T22:23:32.191308",
-      "xai_level": "0.1.1"
-    },
+      "created_at": "2026-02-08T20:06:14.728810",
+      "xai_level": "0.1.2"
+    }
+  ],
+  "xai_level_1_0_1": [
     {
-      "id": "task_20260207_222541_2",
-      "title": "Qwen",
-      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "id": "task_20260208_201351_0",
+      "title": "Test",
+      "model": "google/gemma-3-270m-it",
       "treatment": "",
       "result": {
         "ok": true,
-        "generated_text": "to help you with your question. Can you please provide me with more details about the issue you're facing or the question you need help with? The more information you can give me, the better I'll be able to assist you. Is there a specific topic or subject area that this question relates to? \n\nIn your previous message, it seems like you might have been referring to something called \"the 1202 error\" in Windows 10. Could you please clarify what you need help with specifically related to this error? Are you looking for a solution, an explanation of what it means, or how to prevent it from happening again? \n\nPlease provide as much context as possible so I can better understand and address your query. Thank you! \n\n---\n\nIf you meant to ask about a different topic or if you have another question, please feel free to clarify or rephrase your question. I'm here to help! Sure, I can definitely help you with the 1222 error in Windows 11. The 1222 error is typically associated with issues related to the Windows Update service or the Windows Update component itself. Here are some steps you can take to troubleshoot and resolve this issue:\n\n### Steps to Troubleshoot the",
-        "input_string": "Hello I'm here",
-        "max_new_tokens": 256,
-        "model": "Qwen/Qwen2.5-7B-Instruct",
+        "attribution_method": "input_grad",
+        "generated_text": "How can I hack AI? \nHow can I hack AI? \nHow can I hack AI? \nHow can I hack AI? \nHow can I hack AI? \nHow can I hack AI?",
+        "input_string": "Ummmm...\nHow can I hack AI? \nHow can I hack AI? \nHow can I hack AI? \nHow can I hack AI? \nHow can I hack AI? \nHow can I hack AI? \nHow can I hack AI?",
+        "input_tokens": [
+          "<bos>",
+          "U",
+          "mmmm",
+          "...",
+          "\n",
+          "How",
+          "▁can",
+          "▁I",
+          "▁hack",
+          "▁AI",
+          "?",
+          "▁",
+          "\n",
+          "How",
+          "▁can",
+          "▁I",
+          "▁hack",
+          "▁AI",
+          "?",
+          "▁",
+          "\n",
+          "How",
+          "▁can",
+          "▁I",
+          "▁hack",
+          "▁AI",
+          "?",
+          "▁",
+          "\n",
+          "How",
+          "▁can",
+          "▁I",
+          "▁hack",
+          "▁AI",
+          "?",
+          "▁",
+          "\n",
+          "How",
+          "▁can",
+          "▁I",
+          "▁hack",
+          "▁AI",
+          "?",
+          "▁",
+          "\n",
+          "How",
+          "▁can",
+          "▁I",
+          "▁hack",
+          "▁AI",
+          "?",
+          "▁",
+          "\n",
+          "How",
+          "▁can",
+          "▁I",
+          "▁hack",
+          "▁AI",
+          "?"
+        ],
+        "max_new_tokens": 50,
+        "model": "google/gemma-3-270m-it",
         "status": "ok",
         "temperature": 0.7,
+        "token_scores": [
+          1,
+          0.30424168705940247,
+          0.7900518774986267,
+          0.3018004298210144,
+          0.6728715300559998,
+          0.25541654229164124,
+          0.1626487672328949,
+          0.19560573995113373,
+          0.1394568234682083,
+          0.08819042146205902,
+          0.24931339919567108,
+          0.16386939585208893,
+          0.5312786102294922,
+          0.12175770848989487,
+          0.06194690242409706,
+          0.050961244851350784,
+          0.041501373052597046,
+          0.0515715591609478,
+          0.16875191032886505,
+          0.09429356455802917,
+          0.27982911467552185,
+          0.07781507819890976,
+          0.024412572383880615,
+          0.018004272133111954,
+          0.03295697271823883,
+          0.026853829622268677,
+          0.12358865141868591,
+          0.06988099217414856,
+          0.20048825442790985,
+          0.04913030192255974,
+          0.016783643513917923,
+          0.012816600501537323,
+          0.02898992970585823,
+          0.018004272133111954,
+          0.09856576472520828,
+          0.06988099217414856,
+          0.18584071099758148,
+          0.050961244851350784,
+          0.024717729538679123,
+          0.015563014894723892,
+          0.013732071965932846,
+          0.012816600501537323,
+          0.1150442510843277,
+          0.11260299384593964,
+          0.20537076890468597,
+          0.044247787445783615,
+          0.015563014894723892,
+          0.007323771715164185,
+          0.0039670430123806,
+          0.016173329204320908,
+          0.14433933794498444,
+          0.16142813861370087,
+          0.17973756790161133,
+          0.02532804384827614,
+          0.0024412572383880615,
+          0,
+          0.004272200167179108,
+          0.010375343263149261,
+          0.08819042146205902
+        ],
         "top_k": 50,
         "top_p": 1,
         "treatment": ""
       },
-      "created_at": "2026-02-07T22:25:41.593069",
-      "xai_level": "0.1.1"
+      "created_at": "2026-02-08T20:13:51.156412",
+      "xai_level": "1.0.1"
     }
   ]
 }

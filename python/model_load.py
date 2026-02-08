@@ -9,44 +9,54 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Try to use backup utils if available
 try:
-    from utils import get_config_models, load_llm, get_model_status
+    from utils import get_config_models, get_config_models_grouped, load_llm, get_model_status, get_model_device
 except ImportError:
     # Fallback when running from project root with backup
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     try:
-        from backup.utils import get_config_models, load_llm, get_model_status
+        from backup.utils import get_config_models, get_config_models_grouped, load_llm, get_model_status, get_model_device
     except ImportError:
         from functools import lru_cache
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        def get_model_device(model: Any) -> torch.device:
+            """Safely get the device of a model (avoids meta device)."""
+            try:
+                device = next(model.parameters()).device
+                if device.type == "meta":
+                    return torch.device("cpu")
+                return device
+            except Exception:
+                return torch.device("cpu")
 
         # Project root config.yaml
         _CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
         _MODEL_ALIASES: Dict[str, str] = {}
 
         def get_config_models() -> List[str]:
-            """Read model names from config.yaml llms: list."""
+            """Read model names from config.yaml llms: list or grouped dict."""
+            grouped = get_config_models_grouped()
+            return [m for models in grouped.values() for m in models]
+
+        def get_config_models_grouped() -> Dict[str, List[str]]:
+            """Read llms from config.yaml as grouped dict (group -> list of model ids)."""
             if not _CONFIG_PATH.exists():
-                return []
-            models: List[str] = []
-            in_llms = False
-            for raw in _CONFIG_PATH.read_text(encoding="utf-8").splitlines():
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line.startswith("llms:"):
-                    in_llms = True
-                    continue
-                if not in_llms:
-                    continue
-                if line.startswith("-"):
-                    item = line[1:].strip()
-                    if item:
-                        models.append(item)
-                else:
-                    break
-            return models
+                return {"": []}
+            try:
+                import yaml
+                with open(_CONFIG_PATH, encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                llms = data.get("llms")
+                if isinstance(llms, dict):
+                    return {k: (v if isinstance(v, list) else []) for k, v in llms.items()}
+                if isinstance(llms, list):
+                    flat = [m for m in llms if isinstance(m, str)]
+                    return {"": flat}
+            except Exception:
+                pass
+            return {"": []}
 
         def _resolve_model_name(model_key: str) -> str:
             return _MODEL_ALIASES.get(model_key, model_key)
@@ -120,6 +130,20 @@ except ImportError:
                     info["capacity_gb"] = None
                 device_stats.append(info)
             device_stats.sort(key=lambda x: (0 if x["device"] == "cpu" else 1, x["device"]))
+            config_dict = {}
+            if hasattr(config, "to_dict"):
+                try:
+                    config_dict = config.to_dict()
+                except Exception:
+                    config_dict = {}
+            try:
+                modules_str = str(model)
+                max_lines = 4000
+                lines = modules_str.split("\n")
+                if len(lines) > max_lines:
+                    modules_str = "\n".join(lines[:max_lines]) + "\n... (truncated)"
+            except Exception:
+                modules_str = ""
             return {
                 "model_key": model_key,
                 "name": name,
@@ -127,6 +151,8 @@ except ImportError:
                 "num_heads": num_heads,
                 "num_parameters": num_params,
                 "device_status": device_stats,
+                "config": config_dict,
+                "modules": modules_str,
             }
 
 

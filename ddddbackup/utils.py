@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
 import torch
+import yaml
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -19,38 +20,40 @@ MODEL_ALIASES: Dict[str, str] = {
 }
 
 
-def get_config_models() -> List[str]:
-    """
-    Read model names from config.yaml:
-
-    llms:
-      - tiny-gpt2
-      - distilgpt2
-      - google/gemma-3-4b-it
-    """
+def _load_llms_from_config() -> Any:
+    """Load llms section from config.yaml. Returns either a list (flat) or dict (group -> list)."""
     if not CONFIG_PATH.exists():
         return ["tiny-gpt2", "distilgpt2"]
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data.get("llms") or ["tiny-gpt2", "distilgpt2"]
 
-    models: List[str] = []
-    in_llms = False
-    for raw in CONFIG_PATH.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("llms:"):
-            in_llms = True
-            continue
-        if not in_llms:
-            continue
-        if line.startswith("-"):
-            item = line[1:].strip()
-            if item:
-                models.append(item)
-        else:
-            # stop if we hit another key
-            break
 
-    return models or ["tiny-gpt2", "distilgpt2"]
+def get_config_models() -> List[str]:
+    """
+    Return flat list of model names from config.yaml.
+    Supports both flat (llms: [a, b]) and two-level (llms: group: [a, b]) format.
+    """
+    llms = _load_llms_from_config()
+    if isinstance(llms, dict):
+        return [m for models in llms.values() for m in (models or [])]
+    if isinstance(llms, list):
+        return [m for m in llms if isinstance(m, str)]
+    return ["tiny-gpt2", "distilgpt2"]
+
+
+def get_config_models_grouped() -> Dict[str, List[str]]:
+    """
+    Return llms as grouped dict (group_name -> list of model ids).
+    If config uses flat list, returns {"": flat_list}.
+    """
+    llms = _load_llms_from_config()
+    if isinstance(llms, dict):
+        return {k: (v if isinstance(v, list) else []) for k, v in llms.items()}
+    if isinstance(llms, list):
+        flat = [m for m in llms if isinstance(m, str)]
+        return {"": flat} if flat else {"": ["tiny-gpt2", "distilgpt2"]}
+    return {"": ["tiny-gpt2", "distilgpt2"]}
 
 
 def resolve_model_name(model_key: str) -> str:
@@ -130,6 +133,23 @@ def get_model_status(model_key: str) -> Dict[str, Any]:
 
     device_stats.sort(key=lambda x: (0 if x["device"] == "cpu" else 1, x["device"]))
 
+    config_dict = {}
+    if hasattr(config, "to_dict"):
+        try:
+            config_dict = config.to_dict()
+        except Exception:
+            config_dict = {}
+
+    # Module structure: same as print(model) (PyTorch __str__ tree)
+    try:
+        modules_str = str(model)
+        max_lines = 4000
+        lines = modules_str.split("\n")
+        if len(lines) > max_lines:
+            modules_str = "\n".join(lines[:max_lines]) + "\n... (truncated)"
+    except Exception:
+        modules_str = ""
+
     return {
         "model_key": model_key,
         "name": name,
@@ -137,103 +157,13 @@ def get_model_status(model_key: str) -> Dict[str, Any]:
         "num_heads": num_heads,
         "num_parameters": num_params,
         "device_status": device_stats,
+        "config": config_dict,
+        "modules": modules_str,
     }
-
-
-def chat_completion(
-    model_key: str,
-    messages: List[Dict[str, str]],
-    max_new_tokens: int = 512,
-    do_sample: bool = False,
-) -> str:
-    """
-    Multi-round chat completion using the model's chat template when available.
-
-    Args:
-        model_key: Model key from config.
-        messages: List of {"role": "user"|"assistant"|"system", "content": "..."}.
-        max_new_tokens: Max tokens to generate.
-        do_sample: Whether to sample (vs greedy).
-
-    Returns:
-        Assistant reply text (only the newly generated part).
-    """
-    tokenizer, model = load_llm(model_key)
-    device = get_model_device(model)
-
-    # Prefer chat template if available
-    if getattr(tokenizer, "apply_chat_template", None):
-        try:
-            input_ids = tokenizer.apply_chat_template(
-                messages,
-                tokenize=True,
-                add_generation_prompt=True,
-                return_tensors="pt",
-            )
-        except Exception:
-            input_ids = _simple_chat_prompt_to_ids(tokenizer, messages)
-    else:
-        input_ids = _simple_chat_prompt_to_ids(tokenizer, messages)
-
-    if input_ids.dim() == 1:
-        input_ids = input_ids.unsqueeze(0)
-    input_ids = input_ids.to(device)
-    prompt_length = input_ids.shape[1]
-
-    with torch.inference_mode():
-        out = model.generate(
-            input_ids,
-            max_new_tokens=max_new_tokens,
-            do_sample=do_sample,
-            pad_token_id=tokenizer.eos_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-
-    new_ids = out[0][prompt_length:]
-    return tokenizer.decode(new_ids, skip_special_tokens=True).strip()
-
-
-def text_completion(
-    model_key: str,
-    prompt: str,
-    temperature: float = 0.7,
-    max_new_tokens: int = 256,
-    top_p: float = 1.0,
-    top_k: int = 50,
-) -> str:
-    """
-    Causal LM completion from a single prompt string.
-    Uses do_sample with temperature, top_p, top_k when temperature > 0.
-    """
-    tokenizer, model = load_llm(model_key)
-    device = get_model_device(model)
-    enc = tokenizer(prompt.strip(), return_tensors="pt", add_special_tokens=True)
-    input_ids = enc["input_ids"].to(device)
-    prompt_length = input_ids.shape[1]
-
-    do_sample = temperature > 0
-    gen_kw: Dict[str, Any] = {
-        "max_new_tokens": max_new_tokens,
-        "pad_token_id": tokenizer.eos_token_id,
-        "eos_token_id": tokenizer.eos_token_id,
-        "do_sample": do_sample,
-    }
-    if do_sample:
-        gen_kw["temperature"] = temperature
-        if top_p < 1.0:
-            gen_kw["top_p"] = top_p
-        if top_k > 0:
-            gen_kw["top_k"] = top_k
-
-    with torch.inference_mode():
-        out = model.generate(input_ids, **gen_kw)
-
-    new_ids = out[0][prompt_length:]
-    return tokenizer.decode(new_ids, skip_special_tokens=True).strip()
 
 
 def _simple_chat_prompt_to_ids(tokenizer, messages: List[Dict[str, str]], add_generation_prompt: bool = True):
-    """Build prompt string for models without chat template (e.g. GPT-2)."""
+    """Build prompt string for models without chat template (e.g. GPT-2). Used by circuit/QA."""
     parts = []
     for m in messages:
         role = (m.get("role") or "user").lower()
@@ -250,26 +180,6 @@ def _simple_chat_prompt_to_ids(tokenizer, messages: List[Dict[str, str]], add_ge
         parts.append("Assistant: ")
     text = "".join(parts)
     return tokenizer.encode(text, return_tensors="pt", add_special_tokens=True)
-
-
-def get_cache_token_count(model_key: str, messages: List[Dict[str, str]]) -> int:
-    """Return the number of input tokens for the given messages (prompt length)."""
-    tokenizer, _ = load_llm(model_key)
-    if getattr(tokenizer, "apply_chat_template", None):
-        try:
-            input_ids = tokenizer.apply_chat_template(
-                messages,
-                tokenize=True,
-                add_generation_prompt=True,
-                return_tensors="pt",
-            )
-        except Exception:
-            input_ids = _simple_chat_prompt_to_ids(tokenizer, messages)
-    else:
-        input_ids = _simple_chat_prompt_to_ids(tokenizer, messages)
-    if input_ids.dim() == 1:
-        return input_ids.numel()
-    return input_ids.shape[1]
 
 
 def _circuit_forward(

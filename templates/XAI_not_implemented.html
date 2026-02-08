@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ task.title }} - PnP-XAI-LLM</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem('pnp-xai-theme')||'light';</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide.css') }}" />
+</head>
+<body>
+  {% set header_title = 'PnP-XAI-LLM — ' ~ task.title %}
+  {% set export_as_link = true %}
+  {% include 'header.html' with context %}
+
+  <div class="main-layout">
+    {% set is_index = false %}
+    {% include 'sidebar.html' with context %}
+
+    <main class="content-area">
+      <div class="content-toolbar">
+        <button type="button" class="input-setting-trigger" id="input-setting-trigger" title="Task, Model, Treatment, Name" data-task-type="Not Implemented" data-task-name="{{ task.name or task.title or '' }}" data-task-model="{{ task.model or '' }}" data-task-treatment="{{ task.treatment or '' }}">
+          Not Implemented | {{ task.model or '—' }} | {{ task.treatment or 'None' }} | {{ task.name or task.title or '—' }}
+        </button>
+      </div>
+
+      <div class="results-area">
+        <div class="not-implemented-warning" role="alert">
+          <span class="not-implemented-warning-label">Warning</span>
+          <p class="not-implemented-warning-message"><strong>{{ '{' }} {{ task.xai_level or '—' }} {{ '}' }}</strong> task is not implemented yet.</p>
+        </div>
+      </div>
+    </main>
+  </div>
+  <!-- Modal: confirm model load when session mismatch -->
+  <div class="modal-overlay" id="modal-confirm-load">
+    <div class="modal-dialog">
+      <h3>Confirm Model Load</h3>
+      <p id="modal-message">Loaded Model + Treatment does not match the current session. Load the model with this setting?</p>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-cancel" id="modal-cancel">Cancel</button>
+        <button type="button" class="modal-btn-confirm" id="modal-confirm">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <script>window.PNP_CURRENT_TASK_ID = {{ task.id | tojson }}; window.PNP_CURRENT_TASK_LEVEL = {{ task.xai_level | tojson }};</script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

@@ -44,6 +44,15 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then((r) => r.json().then((body) => ({ ok: r.ok, ...body }))),
+    modelStatus: (model) =>
+      fetch(`/api/model_status?model=${encodeURIComponent(model)}`).then((r) => r.json()),
+    cudaEnvGet: () => fetch("/api/cuda_env").then((r) => r.json()),
+    cudaEnvSet: (value) =>
+      fetch("/api/cuda_env", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      }).then((r) => r.json()),
   };
 
   // State
@@ -53,6 +62,11 @@
   let currentTaskLevel = "0.1"; // Selected XAI level when creating task
   let runAbortController = null; // abort the current /api/run request when user clicks Stop
   let taskLinkNavigateTimeout = null; // delay single-click navigate so double-click can cancel it for rename
+  let modelSpecTooltipEl = null;
+  let modelSpecShowTimeout = null;
+  let modelSpecHideTimeout = null;
+  let modelSpecCache = {}; // modelKey -> status
+  let cudaPanelHideTimeout = null;
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -76,6 +90,11 @@
     modalMessage: $("#modal-message"),
     modalCancel: $("#modal-cancel"),
     modalConfirmBtn: $("#modal-confirm"),
+    btnCudaSetting: $("#btn-cuda-setting"),
+    cudaSettingPanel: $("#cuda-setting-panel"),
+    cudaVisibleDevicesInput: $("#cuda-visible-devices-input"),
+    btnCudaExport: $("#btn-cuda-export"),
+    cudaSettingEchoValue: $("#cuda-setting-echo-value"),
   };
 
   // ----- Sync UI with session -----
@@ -96,11 +115,17 @@
     updateInputSettingTriggerText();
   }
 
-  // Input Setting trigger: on task page show Task's run model/treatment (fixed); before RUN show None
+  function xaiLevelToTaskTypeLabel(level) {
+    const map = { "0.1.1": "Completion", "0.1.2": "Conversation", "1.0.1": "Response Attribution" };
+    return (map[level] != null ? map[level] : (level || "—"));
+  }
+
+  // Input Setting trigger: Task type (Completion|Conversation) | Model | Treatment | User-set name
   function updateInputSettingTriggerText() {
     const trigger = el.inputSettingTrigger;
     if (!trigger) return;
-    const taskTitle = trigger.dataset.taskTitle || (document.querySelector(".input-setting-header")?.textContent?.split("—")[1]?.trim()) || "—";
+    const taskType = trigger.dataset.taskType || "—";
+    const userName = trigger.dataset.taskName != null && trigger.dataset.taskName !== "" ? trigger.dataset.taskName : "—";
     const onTaskPage = !!window.PNP_CURRENT_TASK_ID;
     const hasTaskModel = onTaskPage && trigger.dataset.taskModel != null && trigger.dataset.taskModel !== "";
     const model = hasTaskModel
@@ -109,8 +134,7 @@
     const treatment = (onTaskPage && trigger.dataset.taskTreatment != null)
       ? (trigger.dataset.taskTreatment || "None")
       : (onTaskPage ? "None" : ((el.sidebarTreatment?.value || "").trim() || "None"));
-    const name = taskTitle;
-    trigger.textContent = `${taskTitle} · ${model} · ${treatment} · ${name}`;
+    trigger.textContent = `${taskType}  |  ${model}  |  ${treatment}  |  ${userName}`;
   }
 
   // Load button: disabled while loading, or when selected model === loaded model
@@ -156,6 +180,168 @@
     }
   });
 
+  // ----- Setting: CUDA_VISIBLE_DEVICES export & ECHO 결과 -----
+  async function refreshCudaEcho() {
+    if (!el.cudaSettingEchoValue) return;
+    try {
+      const res = await API.cudaEnvGet();
+      const echo = res.echo != null ? String(res.echo) : (res.CUDA_VISIBLE_DEVICES != null ? String(res.CUDA_VISIBLE_DEVICES) : "—");
+      el.cudaSettingEchoValue.textContent = echo === "" ? "(empty)" : echo;
+      if (el.cudaVisibleDevicesInput) el.cudaVisibleDevicesInput.value = echo === "(empty)" ? "" : echo;
+    } catch (_) {
+      el.cudaSettingEchoValue.textContent = "—";
+    }
+  }
+
+  function showCudaPanel() {
+    if (cudaPanelHideTimeout) clearTimeout(cudaPanelHideTimeout);
+    cudaPanelHideTimeout = null;
+    const panel = el.cudaSettingPanel;
+    if (panel) {
+      panel.classList.add("visible");
+      panel.setAttribute("aria-hidden", "false");
+      refreshCudaEcho();
+    }
+  }
+
+  function scheduleHideCudaPanel() {
+    if (cudaPanelHideTimeout) clearTimeout(cudaPanelHideTimeout);
+    cudaPanelHideTimeout = setTimeout(() => {
+      cudaPanelHideTimeout = null;
+      if (el.cudaSettingPanel) {
+        el.cudaSettingPanel.classList.remove("visible");
+        el.cudaSettingPanel.setAttribute("aria-hidden", "true");
+      }
+    }, 180);
+  }
+
+  el.btnCudaSetting?.addEventListener("click", (e) => {
+    e.stopPropagation();
+  });
+
+  el.btnCudaSetting?.addEventListener("mouseenter", showCudaPanel);
+  el.btnCudaSetting?.addEventListener("mouseleave", scheduleHideCudaPanel);
+  el.cudaSettingPanel?.addEventListener("mouseenter", () => {
+    if (cudaPanelHideTimeout) clearTimeout(cudaPanelHideTimeout);
+    cudaPanelHideTimeout = null;
+  });
+  el.cudaSettingPanel?.addEventListener("mouseleave", scheduleHideCudaPanel);
+
+  el.btnCudaExport?.addEventListener("click", async () => {
+    const input = el.cudaVisibleDevicesInput;
+    if (!input || !el.cudaSettingEchoValue) return;
+    const value = input.value.trim();
+    try {
+      const res = await API.cudaEnvSet(value);
+      const echo = res.echo != null ? String(res.echo) : (res.CUDA_VISIBLE_DEVICES != null ? String(res.CUDA_VISIBLE_DEVICES) : "");
+      el.cudaSettingEchoValue.textContent = echo === "" ? "(empty)" : echo;
+    } catch (err) {
+      el.cudaSettingEchoValue.textContent = "Error: " + (err.message || "failed");
+    }
+  });
+
+  // ----- Loaded Model: hover to show Model Spec -----
+  function getModelSpecTooltipEl() {
+    if (modelSpecTooltipEl) return modelSpecTooltipEl;
+    const el_ = document.createElement("div");
+    el_.id = "model-spec-tooltip";
+    el_.className = "model-spec-tooltip";
+    el_.setAttribute("role", "tooltip");
+    el_.setAttribute("aria-hidden", "true");
+    document.body.appendChild(el_);
+    modelSpecTooltipEl = el_;
+    el_.addEventListener("mouseenter", () => {
+      if (modelSpecHideTimeout) clearTimeout(modelSpecHideTimeout);
+      modelSpecHideTimeout = null;
+    });
+    el_.addEventListener("mouseleave", () => {
+      scheduleHideModelSpec();
+    });
+    return el_;
+  }
+
+  function scheduleShowModelSpec() {
+    if (modelSpecShowTimeout) clearTimeout(modelSpecShowTimeout);
+    modelSpecShowTimeout = null;
+    const modelKey = session.loaded_model;
+    if (!modelKey || !el.loadedModelDisplay) return;
+    modelSpecShowTimeout = setTimeout(async () => {
+      modelSpecShowTimeout = null;
+      const tip = getModelSpecTooltipEl();
+      tip.classList.add("loading");
+      tip.setAttribute("aria-hidden", "false");
+      const displayRect = el.loadedModelDisplay.getBoundingClientRect();
+      tip.style.left = `${displayRect.left}px`;
+      tip.style.top = `${displayRect.bottom + 6}px`;
+      try {
+        const status = modelSpecCache[modelKey] || await API.modelStatus(modelKey);
+        if (status.error) throw new Error(status.error);
+        modelSpecCache[modelKey] = status;
+        const memStr = (status.device_status || [])
+          .map((d) => `${d.device}: ${d.memory_gb != null ? d.memory_gb + " GB" : "—"}`)
+          .join("\n");
+        const configStr = status.config && Object.keys(status.config).length
+          ? JSON.stringify(status.config, null, 2)
+          : "—";
+        const modulesStr = status.modules && status.modules.trim() ? status.modules : "—";
+        tip.classList.remove("loading");
+        tip.innerHTML = `
+          <div class="model-spec-tooltip-title">Model Spec</div>
+          <dl class="model-spec-dl">
+            <dt>Name</dt><dd>${escapeHtml(String(status.name || status.model_key || "—"))}</dd>
+            <dt>Layers</dt><dd>${status.num_layers != null ? escapeHtml(String(status.num_layers)) : "—"}</dd>
+            <dt>Heads</dt><dd>${status.num_heads != null ? escapeHtml(String(status.num_heads)) : "—"}</dd>
+            <dt>Memory</dt><dd><pre class="model-spec-memory">${escapeHtml(memStr)}</pre></dd>
+          </dl>
+          <details class="model-spec-config">
+            <summary>Model structure (config)</summary>
+            <pre class="model-spec-config-json">${escapeHtml(configStr)}</pre>
+          </details>
+          <details class="model-spec-modules">
+            <summary>Module structure (modules)</summary>
+            <pre class="model-spec-modules-pre">${escapeHtml(modulesStr)}</pre>
+          </details>
+        `;
+      } catch (err) {
+        tip.classList.remove("loading");
+        tip.innerHTML = `<div class="model-spec-tooltip-error">${escapeHtml(err.message || "Failed to load spec")}</div>`;
+      }
+      tip.classList.add("visible");
+    }, 350);
+  }
+
+  function scheduleHideModelSpec() {
+    if (modelSpecHideTimeout) clearTimeout(modelSpecHideTimeout);
+    modelSpecHideTimeout = setTimeout(() => {
+      modelSpecHideTimeout = null;
+      if (modelSpecTooltipEl) {
+        modelSpecTooltipEl.classList.remove("visible", "loading");
+        modelSpecTooltipEl.setAttribute("aria-hidden", "true");
+      }
+    }, 150);
+  }
+
+  function cancelShowModelSpec() {
+    if (modelSpecShowTimeout) {
+      clearTimeout(modelSpecShowTimeout);
+      modelSpecShowTimeout = null;
+    }
+  }
+
+  if (el.loadedModelDisplay) {
+    el.loadedModelDisplay.addEventListener("mouseenter", () => {
+      if (!el.loadedModelDisplay.classList.contains("has-model")) return;
+      cancelShowModelSpec();
+      if (modelSpecHideTimeout) clearTimeout(modelSpecHideTimeout);
+      modelSpecHideTimeout = null;
+      scheduleShowModelSpec();
+    });
+    el.loadedModelDisplay.addEventListener("mouseleave", () => {
+      cancelShowModelSpec();
+      scheduleHideModelSpec();
+    });
+  }
+
   // ----- Sidebar section toggle (Loaded Model, Treatments, Created Task Panels) -----
   document.querySelector(".sidebar")?.addEventListener("click", (e) => {
     const title = e.target.closest(".sidebar-section-title");
@@ -170,10 +356,12 @@
   });
 
   // ----- Input Setting panel toggle (task-specific, right side) -----
-  el.inputSettingTrigger.addEventListener("click", () => {
-    el.inputSettingPanel.classList.toggle("visible");
-    el.inputSettingTrigger.classList.toggle("has-setting", el.inputSettingPanel.classList.contains("visible"));
-  });
+  if (el.inputSettingTrigger && el.inputSettingPanel) {
+    el.inputSettingTrigger.addEventListener("click", () => {
+      el.inputSettingPanel.classList.toggle("visible");
+      el.inputSettingTrigger.classList.toggle("has-setting", el.inputSettingPanel.classList.contains("visible"));
+    });
+  }
 
   // ----- Right panel: open in separate window (independent of main page) -----
   let panelWindow = null;
@@ -304,6 +492,13 @@
     const treatment = el.sidebarTreatment.value.trim() || "";
     const inputSetting = { ...gatherTaskInput(), model, treatment };
 
+    if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2") {
+      if (!(inputSetting.content || "").trim()) {
+        alert("메시지를 입력하세요.");
+        return;
+      }
+    }
+
     if (forceLoadModel) {
       try {
         const res = await API.loadModel({ model, treatment });
@@ -324,15 +519,33 @@
       generationStatus.classList.add("visible");
     }
     try {
+      if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2") {
+        const userContent = (inputSetting.content || "").trim();
+        if (userContent && window.PNP_appendConversationMessage && window.PNP_appendConversationMessageGenerating) {
+          window.PNP_appendConversationMessage("user", userContent);
+          window.PNP_appendConversationMessageGenerating();
+          if (window.PNP_clearConversationUserInput) window.PNP_clearConversationUserInput();
+        }
+      }
       const r = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model, treatment, input_setting: inputSetting }),
         signal: runAbortController.signal,
       });
-      const res = await r.json().then((body) => ({ ok: r.ok, ...body }));
+      const text = await r.text();
+      let res;
+      try {
+        res = { ok: r.ok, ...JSON.parse(text) };
+      } catch (parseErr) {
+        console.error("Run response was not JSON:", text.slice(0, 200));
+        if (window.PNP_finishGeneratingMessage) window.PNP_finishGeneratingMessage("Invalid response from server.", true);
+        alert("Server returned an invalid response (status " + r.status + "). Check the console for details.");
+        return;
+      }
 
       if (!res.ok && res.error === "session_mismatch") {
+        if (window.PNP_finishGeneratingMessage) window.PNP_finishGeneratingMessage("Session mismatch. Please load the model.", true);
         pendingRunAfterConfirm = { model, treatment };
         el.modalMessage.textContent =
           "Loaded Model + Treatment does not match the current session. Load the model with this setting?";
@@ -341,14 +554,52 @@
       }
 
       if (res.error) {
+        if (window.PNP_finishGeneratingMessage) window.PNP_finishGeneratingMessage(res.error, true);
         alert(res.error);
         return;
       }
 
       const taskId = window.PNP_CURRENT_TASK_ID;
+      const isConversationResult = res && "conversation_id" in res;
       const isCompletionResult = res && "generated_text" in res;
+      const isAttributionResult = res && Array.isArray(res.input_tokens) && Array.isArray(res.token_scores);
+
+      if (isConversationResult && window.PNP_finishGeneratingMessage) {
+        window.PNP_finishGeneratingMessage(res.generated_text != null ? res.generated_text : "");
+        if (window.PNP_setConversationId) window.PNP_setConversationId(res.conversation_id || "");
+        if (window.PNP_updateConversationCacheCount && res.cache_message_count != null) {
+          window.PNP_updateConversationCacheCount(res.cache_message_count);
+        }
+        const wrap = document.getElementById("conversation-wrap");
+        if (wrap) {
+          const prev = parseInt(wrap.dataset.cumulativeGenerated || "0", 10);
+          const cum = prev + (res.generated_tokens || 0);
+          wrap.dataset.cumulativeGenerated = String(cum);
+          if (window.PNP_updateConversationTokenCount) {
+            window.PNP_updateConversationTokenCount(res.input_tokens, res.generated_tokens, cum);
+          }
+        }
+        if (window.PNP_clearConversationUserInput) window.PNP_clearConversationUserInput();
+        const resultToShow = { ...res };
+        if (wrap && wrap.dataset.cumulativeGenerated) resultToShow.cumulative_generated_tokens = parseInt(wrap.dataset.cumulativeGenerated, 10);
+        if (inputSetting.system_instruction !== undefined) resultToShow.system_instruction = inputSetting.system_instruction;
+        if (taskId) {
+          await API.updateTask(taskId, { result: resultToShow, model, treatment });
+          if (el.inputSettingTrigger) {
+            el.inputSettingTrigger.dataset.taskModel = model;
+            el.inputSettingTrigger.dataset.taskTreatment = treatment;
+          }
+          updateInputSettingTriggerText();
+        }
+        const jsonEl = document.getElementById("conversation-result-json");
+        if (jsonEl) jsonEl.textContent = JSON.stringify(resultToShow, null, 2);
+        return;
+      }
 
       function renderResultContent() {
+        if (isAttributionResult && window.PNP_renderAttributionResultHTML) {
+          return window.PNP_renderAttributionResultHTML(res, escapeHtml);
+        }
         if (isCompletionResult) {
           return `
             <div class="results-completion-wrap">
@@ -369,9 +620,12 @@
         `;
       }
 
-      el.resultsPlaceholder.classList.add("hidden");
-      el.resultsContent.classList.add("visible");
-      el.resultsContent.innerHTML = renderResultContent();
+      if (el.resultsPlaceholder) el.resultsPlaceholder.classList.add("hidden");
+      if (el.resultsContent) {
+        el.resultsContent.classList.add("visible");
+        el.resultsContent.innerHTML = renderResultContent();
+        if (isAttributionResult && window.PNP_initAttributionGradientControls) window.PNP_initAttributionGradientControls(el.resultsContent);
+      }
 
       if (taskId) {
         await API.updateTask(taskId, { result: res, model, treatment });
@@ -380,9 +634,14 @@
           el.inputSettingTrigger.dataset.taskTreatment = treatment;
         }
         updateInputSettingTriggerText();
-        document.getElementById("results-content").innerHTML = renderResultContent();
-        document.getElementById("results-placeholder")?.classList.add("hidden");
-        document.getElementById("results-content")?.classList.add("visible");
+        const resContent = document.getElementById("results-content");
+        const resPlaceholder = document.getElementById("results-placeholder");
+        if (resContent) resContent.innerHTML = renderResultContent();
+        resPlaceholder?.classList.add("hidden");
+        resContent?.classList.add("visible");
+        if (isAttributionResult && resContent && window.PNP_initAttributionGradientControls) {
+          window.PNP_initAttributionGradientControls(resContent);
+        }
       } else {
         const title = prompt("Enter task title (will be saved):", "Task " + new Date().toLocaleString());
         if (title) {
@@ -398,7 +657,11 @@
         }
       }
     } catch (err) {
-      if (err.name === "AbortError") return;
+      if (err.name === "AbortError") {
+        if (window.PNP_finishGeneratingMessage) window.PNP_finishGeneratingMessage("Cancelled.", true);
+        return;
+      }
+      if (window.PNP_finishGeneratingMessage) window.PNP_finishGeneratingMessage("Error: " + (err.message || String(err)), true);
       alert(err.message || String(err));
     } finally {
       runAbortController = null;
@@ -420,23 +683,46 @@
       const key = el.dataset.taskInput || el.name || el.id;
       if (key) obj[key] = el.value !== undefined ? el.value : el.textContent;
     });
+    if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2") {
+      const cidEl = document.getElementById("conversation-id");
+      const contentEl = document.getElementById("conversation-user-input");
+      const systemEl = document.getElementById("input-system-instruction");
+      if (cidEl) obj.conversation_id = cidEl.value || "";
+      if (contentEl) obj.content = (contentEl.value || "").trim();
+      if (systemEl) obj.system_instruction = (systemEl.value || "").trim();
+    }
     return obj;
   }
 
-  el.btnRun.addEventListener("click", () => {
-    if (el.btnRun.classList.contains("is-running")) {
-      if (!confirm("Generation을 중단하시겠습니까?")) return;
-      if (runAbortController) runAbortController.abort();
-      return;
-    }
-    doRun(false);
-  });
+  if (el.btnRun) {
+    el.btnRun.addEventListener("click", () => {
+      if (el.btnRun.classList.contains("is-running")) {
+        if (!confirm("Generation을 중단하시겠습니까?")) return;
+        if (runAbortController) runAbortController.abort();
+        return;
+      }
+      doRun(false);
+    });
+  }
 
-  // ----- Modal: confirm model load -----
-  el.modalCancel.addEventListener("click", () => {
-    el.modalConfirm.classList.remove("visible");
-    pendingRunAfterConfirm = null;
-  });
+  const conversationInput = document.getElementById("conversation-user-input");
+  if (conversationInput) {
+    conversationInput.addEventListener("keydown", function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (el.btnRun && !el.btnRun.classList.contains("is-running")) {
+          doRun(false);
+        }
+      }
+    });
+  }
+
+  if (el.modalCancel) {
+    el.modalCancel.addEventListener("click", () => {
+      el.modalConfirm?.classList.remove("visible");
+      pendingRunAfterConfirm = null;
+    });
+  }
 
   // ----- Export / Import -----
   const btnExport = document.getElementById("btn-export");
@@ -472,14 +758,16 @@
     });
   }
 
-  el.modalConfirmBtn.addEventListener("click", async () => {
-    el.modalConfirm.classList.remove("visible");
-    if (pendingRunAfterConfirm) {
-      const { model, treatment } = pendingRunAfterConfirm;
-      pendingRunAfterConfirm = null;
-      await doRun(true);
-    }
-  });
+  if (el.modalConfirmBtn) {
+    el.modalConfirmBtn.addEventListener("click", async () => {
+      el.modalConfirm?.classList.remove("visible");
+      if (pendingRunAfterConfirm) {
+        const { model, treatment } = pendingRunAfterConfirm;
+        pendingRunAfterConfirm = null;
+        await doRun(true);
+      }
+    });
+  }
 
   // ----- Render task list -----
   function renderTaskList(tasks, xaiLevelNames = {}) {
@@ -552,12 +840,15 @@
     };
     updateSessionUI();
 
-    // Input setting header
-    const header = document.querySelector(".input-setting-header");
-    if (header) header.textContent = `${task.xai_level || ""} — ${task.title || ""} (task-specific input)`;
+    if (el.inputSettingTrigger) {
+      el.inputSettingTrigger.dataset.taskType = xaiLevelToTaskTypeLabel(task.xai_level);
+      el.inputSettingTrigger.dataset.taskName = (task.name != null && task.name !== undefined ? String(task.name) : (task.title || "")).trim();
+      el.inputSettingTrigger.dataset.taskModel = task.model != null && task.model !== undefined ? String(task.model) : "";
+      el.inputSettingTrigger.dataset.taskTreatment = task.treatment !== undefined && task.treatment !== null ? String(task.treatment) : "";
+    }
+    updateInputSettingTriggerText();
 
-    // 0.1.1 Completion: open Input Setting panel so form is visible
-    if (task.xai_level === "0.1.1") {
+    if (task.xai_level === "0.1.1" || task.xai_level === "0.1.2" || task.xai_level === "1.0.1") {
       el.inputSettingPanel?.classList.add("visible");
       el.inputSettingTrigger?.classList.add("has-setting");
     }
@@ -567,8 +858,12 @@
       el.resultsPlaceholder?.classList.add("hidden");
       el.resultsContent?.classList.add("visible");
       const res = task.result;
+      const isAttribution = res && Array.isArray(res.input_tokens) && Array.isArray(res.token_scores);
       const isCompletion = res && "generated_text" in res;
-      if (isCompletion) {
+      if (isAttribution && window.PNP_renderAttributionResultHTML) {
+        el.resultsContent.innerHTML = window.PNP_renderAttributionResultHTML(res, escapeHtml);
+        if (window.PNP_initAttributionGradientControls) window.PNP_initAttributionGradientControls(el.resultsContent);
+      } else if (isCompletion) {
         el.resultsContent.innerHTML = `
           <div class="results-completion-wrap">
             <h3>Generated</h3>
@@ -638,10 +933,9 @@
         API.updateTask(taskId, { title: newTitle }).then((res) => {
           if (res.error) link.textContent = currentTitle;
         });
-        const header = document.querySelector(".input-setting-header");
-        if (header && window.PNP_CURRENT_TASK_ID === taskId) {
-          const level = item?.dataset?.level?.replace("xai_level_", "").replace(/_/g, ".") || "";
-          header.textContent = `${level} — ${newTitle} (task-specific input)`;
+        if (el.inputSettingTrigger && window.PNP_CURRENT_TASK_ID === taskId) {
+          el.inputSettingTrigger.dataset.taskName = newTitle;
+          updateInputSettingTriggerText();
         }
       }
     };
@@ -741,10 +1035,13 @@
         const option = document.querySelector(`.create-task-option[data-level="${createLevel}"]`);
         showCreateTaskModal(createLevel, "");
       }
-      // 0.1.1 Completion task page: open Input Setting so Temperature/Input String form is visible
-      if (window.PNP_CURRENT_TASK_LEVEL === "0.1.1" && el.inputSettingPanel) {
+      // 0.1.1 Completion / 0.1.2 Conversation / 1.0.1 Response Attribution: open Input Setting panel
+      if ((window.PNP_CURRENT_TASK_LEVEL === "0.1.1" || window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "1.0.1") && el.inputSettingPanel) {
         el.inputSettingPanel.classList.add("visible");
         el.inputSettingTrigger?.classList.add("has-setting");
+      }
+      if (el.resultsContent && el.resultsContent.querySelector(".results-attribution-wrap")) {
+        if (window.PNP_initAttributionGradientControls) window.PNP_initAttributionGradientControls(el.resultsContent);
       }
     } catch (e) {
       console.error("Init error:", e);

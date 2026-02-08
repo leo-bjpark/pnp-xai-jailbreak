@@ -4,6 +4,7 @@ PnP-XAI-LLM - VSCode-like XAI analysis tool.
 
 import json
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -15,7 +16,7 @@ if str(ROOT) not in sys.path:
 from flask import Flask, jsonify, render_template, request
 
 # Model list and loading via python.model_load (reads config.yaml, uses backup.utils internally)
-from python.model_load import get_config_models, load_model, get_model_status
+from python.model_load import get_config_models, get_config_models_grouped, load_model, get_model_status
 
 from python.config_loader import get_xai_level_names, get_xai_level_names_grouped
 from python.session_store import (
@@ -38,6 +39,9 @@ SESSION_STATE = {
     "treatment": None,
 }
 
+# Conversation cache for 0.1.2: conversation_id -> {"model_key": str, "messages": [{"role", "content"}]}
+CONVERSATION_CACHE = {}
+
 
 @app.get("/panel")
 def panel():
@@ -49,12 +53,14 @@ def panel():
 def index():
     """Main IDE-like interface."""
     models = get_config_models()
+    models_grouped = get_config_models_grouped()
     xai_level_names = get_xai_level_names()
     xai_level_grouped = get_xai_level_names_grouped()
     tasks = get_tasks(xai_level_names)
     return render_template(
         "index.html",
         models=models,
+        models_grouped=models_grouped,
         tasks=tasks,
         xai_level_names=xai_level_names,
         xai_level_grouped=xai_level_grouped,
@@ -67,8 +73,9 @@ def task_view(task_id):
     task = get_task_by_id(task_id)
     if not task:
         models = get_config_models()
+        models_grouped = get_config_models_grouped()
         xai_level_names = get_xai_level_names()
-        return render_template("index.html", models=models, tasks=get_tasks(xai_level_names), xai_level_names=xai_level_names, xai_level_grouped=get_xai_level_names_grouped(), error="Task not found")
+        return render_template("index.html", models=models, models_grouped=models_grouped, tasks=get_tasks(xai_level_names), xai_level_names=xai_level_names, xai_level_grouped=get_xai_level_names_grouped(), error="Task not found")
     level_key = task.get("xai_level", "0.1")
     return _render_task(task_id, level_key)
 
@@ -79,20 +86,26 @@ def _task_template(level_key: str) -> str:
     """Template name for task view by XAI level."""
     if level_key == "0.1.1":
         return "XAI_0_1_1_completion.html"
-    return "xai_task.html"
+    if level_key == "0.1.2":
+        return "XAI_0_1_2_conversation.html"
+    if level_key == "1.0.1":
+        return "XAI_1_1_response_attribution.html"
+    return "XAI_not_implemented.html"
 
 
 def _render_task(task_id: str, level_key: str):
     task = get_task_by_id(task_id)
     if not task:
         models = get_config_models()
+        models_grouped = get_config_models_grouped()
         xai_level_names = get_xai_level_names()
-        return render_template("index.html", models=models, tasks=get_tasks(xai_level_names), xai_level_names=xai_level_names, xai_level_grouped=get_xai_level_names_grouped(), error="Task not found")
+        return render_template("index.html", models=models, models_grouped=models_grouped, tasks=get_tasks(xai_level_names), xai_level_names=xai_level_names, xai_level_grouped=get_xai_level_names_grouped(), error="Task not found")
     models = get_config_models()
+    models_grouped = get_config_models_grouped()
     xai_level_names = get_xai_level_names()
     tasks = get_tasks(xai_level_names)
     template = _task_template(level_key)
-    return render_template(template, task=task, models=models, tasks=tasks, xai_level_names=xai_level_names, xai_level_grouped=get_xai_level_names_grouped())
+    return render_template(template, task=task, models=models, models_grouped=models_grouped, tasks=tasks, xai_level_names=xai_level_names, xai_level_grouped=get_xai_level_names_grouped())
 
 
 # ----- API: Tasks -----
@@ -205,6 +218,27 @@ def api_model_status():
         return jsonify({"error": str(exc)}), 400
 
 
+@app.get("/api/cuda_env")
+def api_get_cuda_env():
+    """Return current CUDA_VISIBLE_DEVICES (echo result)."""
+    import os
+    value = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    return jsonify({"CUDA_VISIBLE_DEVICES": value, "echo": value})
+
+
+@app.post("/api/cuda_env")
+def api_set_cuda_env():
+    """Set CUDA_VISIBLE_DEVICES and return new echo result."""
+    import os
+    data = request.get_json(force=True) or {}
+    value = data.get("value", "")
+    if value is None:
+        value = ""
+    value = str(value).strip()
+    os.environ["CUDA_VISIBLE_DEVICES"] = value
+    return jsonify({"CUDA_VISIBLE_DEVICES": value, "echo": value})
+
+
 # ----- API: Run (placeholder - extend for actual XAI computation) -----
 
 # ----- API: Memory Export/Import -----
@@ -265,8 +299,104 @@ def api_run():
             "current": {"model": current_model, "treatment": current_treatment},
         }), 400
 
-    # Completion (0.1.1): input_string + generation params (input_string can be empty)
+    # Conversation (0.1.2): cache-backed multi-turn chat; return input_tokens, generated_tokens, conversation_id
+    conversation_id = input_setting.get("conversation_id") or None
+    content = (input_setting.get("content") or "").strip()
+    messages_input = input_setting.get("messages")
+    system_instruction = (input_setting.get("system_instruction") or "").strip()
+
+    def _ensure_system_at_start(messages: list) -> list:
+        """Put current system_instruction at the very start of messages (strip any existing leading system)."""
+        if not system_instruction:
+            return messages
+        # Drop any existing leading system message so we use the current one
+        rest = messages
+        while rest and (rest[0].get("role") or "").lower() == "system":
+            rest = rest[1:]
+        return [{"role": "system", "content": system_instruction}] + rest
+
+    # Enter conversation branch when there is new content or a full messages list (first message has content but no id)
+    if current_model and (content or (messages_input and isinstance(messages_input, list))):
+        try:
+            from python.model_generation import chat_completion, get_cache_token_count, get_text_token_count
+            temperature = float(input_setting.get("temperature", 0.7))
+            max_new_tokens = int(input_setting.get("max_new_tokens", 256))
+            top_p = float(input_setting.get("top_p", 1.0))
+            top_k = int(input_setting.get("top_k", 50))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid input_setting: temperature, max_new_tokens, top_p, top_k must be numbers"}), 400
+
+        if conversation_id and content:
+            cached = CONVERSATION_CACHE.get(conversation_id)
+            if not cached or cached.get("model_key") != current_model:
+                messages = _ensure_system_at_start([{"role": "user", "content": content}])
+                conversation_id = None
+            else:
+                messages = _ensure_system_at_start(
+                    list(cached["messages"]) + [{"role": "user", "content": content}]
+                )
+        elif content:
+            messages = _ensure_system_at_start([{"role": "user", "content": content}])
+            conversation_id = None
+        elif messages_input:
+            messages = [{"role": m.get("role", "user"), "content": (m.get("content") or "").strip()} for m in messages_input if (m.get("content") or "").strip()]
+            if not messages:
+                return jsonify({"error": "messages must contain at least one non-empty message"}), 400
+            messages = _ensure_system_at_start(messages)
+            conversation_id = None
+        else:
+            return jsonify({"error": "Provide conversation_id and content, or messages list"}), 400
+
+        try:
+            input_tokens = get_cache_token_count(current_model, messages)
+            do_sample = temperature > 0
+            generated_text = chat_completion(
+                model_key=current_model,
+                messages=messages,
+                max_new_tokens=max_new_tokens,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+            )
+            generated_tokens = get_text_token_count(current_model, generated_text)
+            messages.append({"role": "assistant", "content": generated_text})
+            if conversation_id is None:
+                conversation_id = str(uuid.uuid4())
+            CONVERSATION_CACHE[conversation_id] = {"model_key": current_model, "messages": messages}
+
+            # conversation_list for saving/restore: instruction + messages as user/ai
+            conversation_list = {
+                "instruction": system_instruction,
+                "messages": [
+                    {"role": "user" if m.get("role") == "user" else "ai", "content": (m.get("content") or "").strip()}
+                    for m in messages
+                    if (m.get("role") or "").lower() in ("user", "assistant")
+                ],
+            }
+
+            result = {
+                "status": "ok",
+                "model": model,
+                "treatment": treatment,
+                "generated_text": generated_text,
+                "input_tokens": input_tokens,
+                "generated_tokens": generated_tokens,
+                "conversation_id": conversation_id,
+                "cache_message_count": len(messages),
+                "conversation_list": conversation_list,
+                "temperature": temperature,
+                "max_new_tokens": max_new_tokens,
+                "top_p": top_p,
+                "top_k": top_k,
+            }
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    # Completion (0.1.1) or Response Attribution (1.0.1): input_string + generation params
     input_string = (input_setting.get("input_string") or "").strip()
+    attribution_method = (input_setting.get("attribution_method") or "").strip()
     if "input_string" in input_setting and current_model:
         try:
             temperature = float(input_setting.get("temperature", 0.7))
@@ -275,8 +405,26 @@ def api_run():
             top_k = int(input_setting.get("top_k", 50))
         except (TypeError, ValueError):
             return jsonify({"error": "Invalid input_setting: temperature, max_new_tokens, top_p, top_k must be numbers"}), 400
+        if attribution_method:
+            try:
+                from python.xai_1.input_attribution import compute_input_attribution
+                result = compute_input_attribution(
+                    model_key=current_model,
+                    input_string=input_string,
+                    temperature=temperature,
+                    max_new_tokens=max_new_tokens,
+                    top_p=top_p,
+                    top_k=top_k,
+                    attribution_method=attribution_method,
+                )
+                result["status"] = "ok"
+                result["model"] = model
+                result["treatment"] = treatment
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
         try:
-            from backup.utils import text_completion
+            from python.model_generation import text_completion
             generated_text = text_completion(
                 model_key=current_model,
                 prompt=input_string,
@@ -309,6 +457,16 @@ def api_run():
         "input_setting": input_setting,
     }
     return jsonify(result)
+
+
+@app.post("/api/conversation/clear")
+def api_conversation_clear():
+    """Clear server-side conversation cache for the given conversation_id (0.1.2)."""
+    data = request.get_json(force=True) or {}
+    conversation_id = data.get("conversation_id")
+    if conversation_id and conversation_id in CONVERSATION_CACHE:
+        del CONVERSATION_CACHE[conversation_id]
+    return jsonify({"status": "ok"})
 
 
 if __name__ == "__main__":
