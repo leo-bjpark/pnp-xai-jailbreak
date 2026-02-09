@@ -1,0 +1,46 @@
+{# Standalone Working Memory view (optional). Currently not routed, but kept
+   as a dedicated template if we want a full‑page RAM/GPU inspector later. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Working Memory — PnP-XAI-LLM</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem('pnp-xai-theme')||'light';</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide.css') }}" />
+</head>
+<body>
+  {% set header_title = 'Working Memory' %}
+  {% include 'header.html' with context %}
+
+  <main class="content-area">
+    <section class="working-memory-page">
+      <h2>Working Memory</h2>
+      <p class="input-setting-hint">
+        현재 세션에서 RAM / GPU 에 보관 중인 모델과 데이터 변수들을 확인하고 관리합니다.
+      </p>
+
+      <div class="data-vars-table-wrap">
+        <table class="data-vars-table">
+          <thead>
+            <tr>
+              <th class="data-vars-th-name">Name</th>
+              <th class="data-vars-th-memory">Memory (GPU / RAM)</th>
+              <th class="data-vars-th-action"></th>
+            </tr>
+          </thead>
+          <tbody id="data-vars-tbody">
+            <tr class="data-vars-empty-row" id="data-vars-empty-row">
+              <td colspan="3" id="data-vars-empty">No items.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/working_memory.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/memory_panels.js') }}"></script>
+</body>
+</html>
+

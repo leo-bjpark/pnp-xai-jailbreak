@@ -28,6 +28,10 @@ html, body {
   -webkit-app-region: drag;
 }
 
+.app-title-bar-left {
+  flex-shrink: 0;
+}
+
 .app-title-bar h1 {
   font-size: 17px;
   font-weight: 700;
@@ -36,8 +40,16 @@ html, body {
   color: var(--text);
 }
 
+.app-title-bar-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 0;
+}
+
 .app-title-bar-right {
-  margin-left: auto;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -61,6 +73,80 @@ html, body {
 
 .json-wrap:hover .btn-json {
   background: var(--hover);
+}
+
+/* Memory clear buttons (Session / Result / Variable) - centered in header */
+.memory-clear-btns {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.memory-panel-wrap {
+  position: relative;
+}
+.memory-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 400px;
+  max-width: 1000px;
+  max-height: min(80vh, 600px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 101;
+  overflow: hidden;
+}
+.memory-dropdown.visible {
+  display: block;
+}
+.btn-memory-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--sidebar);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-memory-clear:hover {
+  background: var(--hover);
+}
+.btn-memory-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.memory-summary-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--sidebar);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.memory-summary-label {
+  font-weight: 500;
+}
+.memory-summary-value {
+  font-variant-numeric: tabular-nums;
+  min-width: 2.5em;
+}
+.memory-summary-sep {
+  opacity: 0.6;
+  margin: 0 2px;
 }
 
 .btn-empty-cache {
@@ -143,7 +229,7 @@ html, body {
   right: 0;
   margin-top: 4px;
   min-width: 480px;
-  max-width: 560px;
+  max-width: 1000px;
   max-height: 320px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -166,7 +252,7 @@ html, body {
 }
 
 .data-vars-table-wrap {
-  max-height: 280px;
+  max-height: min(70vh, 540px);
   overflow: auto;
 }
 
@@ -284,37 +370,6 @@ html, body {
   display: none;
 }
 
-/* Box icon: toggle right panel (next to KAIST) */
-.btn-right-panel {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--sidebar);
-  color: var(--text);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.btn-right-panel:hover {
-  background: var(--hover);
-  border-color: var(--muted);
-}
-
-.btn-right-panel .icon-box {
-  width: 18px;
-  height: 18px;
-}
-
-.btn-right-panel.active {
-  background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
-}
 
 /* Right panel (slide-in from right) */
 .right-panel {
@@ -761,6 +816,42 @@ a.create-task-row {
   border-bottom: 1px solid var(--border);
 }
 
+.model-spec-layer-config {
+  margin: 12px 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.model-spec-layer-config-title {
+  margin-bottom: 8px;
+  border-bottom: none;
+  font-size: 12px;
+}
+.model-spec-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.model-spec-layer-row label {
+  flex: 0 0 90px;
+  color: var(--muted);
+}
+.model-spec-layer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--sidebar);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.model-spec-layer-input::placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .model-spec-dl {
   margin: 0 0 10px 0;
   display: grid;
@@ -1029,10 +1120,16 @@ a.create-task-row {
 
 .dataset-pipeline-item {
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-radius: 4px;
 }
 
 .dataset-pipeline-link {
-  display: block;
+  flex: 1;
+  min-width: 0;
   padding: 6px 8px;
   font-size: 12px;
   color: var(--text);
@@ -1049,10 +1146,87 @@ a.create-task-row {
   font-weight: 500;
 }
 
+.dataset-pipeline-delete {
+  flex-shrink: 0;
+  display: flex;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 0;
+}
+
+.dataset-pipeline-item:hover .dataset-pipeline-delete {
+  display: flex;
+}
+
+.dataset-pipeline-delete:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+}
+
 .dataset-pipeline-empty {
   font-size: 12px;
   color: var(--muted);
   padding: 8px 0;
+}
+
+/* Sidebar Variable Cache */
+.sidebar-variable-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+}
+.sidebar-variable-item {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.sidebar-variable-name {
+  display: block;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-variable-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px 0;
+  list-style: none;
+}
+
+/* Context menu (right-click on Data Management) */
+.context-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: 4px 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.context-menu-item {
+  padding: 6px 12px;
+  font-size: 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+}
+.context-menu-item:hover {
+  background: var(--hover);
+}
+.context-menu-delete:hover {
+  color: var(--error-text, #c00);
 }
 
 /* Right content area */
@@ -1506,7 +1680,7 @@ a.create-task-row {
   top: 50%;
   transform: translate(-50%, -50%);
   width: 90%;
-  max-width: 560px;
+  max-width: 1000px;
   padding: 16px;
   background: var(--bg);
   border: 1px solid var(--border);

@@ -1,8 +1,71 @@
 {# Shared app title bar. Expects: header_title (string). Optional: export_as_link (bool, default false) — if true, Export is an <a>, else <button id="btn-export">. #}
 <header class="app-title-bar">
-  <h1>PnP-XAI-LLM</h1>
+  <div class="app-title-bar-left">
+    <h1>PnP-XAI-LLM</h1>
+  </div>
+  <div class="app-title-bar-center">
+    <div class="memory-clear-btns">
+      <div class="memory-panel-wrap">
+        <button type="button" class="btn-memory-clear btn-clear-session" id="btn-clear-session" title="Session · 목록 보기 · 개별 삭제">
+          <span class="btn-memory-icon">🧵</span>
+          <span class="btn-memory-label">Session</span>
+        </button>
+        <div class="memory-dropdown" id="session-dropdown" aria-hidden="true">
+          <div class="data-vars-dropdown-header">Session · Task | model | treatment | 이름 (Cache)</div>
+          <div class="data-vars-table-wrap">
+            <table class="data-vars-table">
+              <thead><tr><th class="data-vars-th-name">Task | model | treatment | 이름</th><th class="data-vars-th-action"></th></tr></thead>
+              <tbody id="session-tbody">
+                <tr class="data-vars-empty-row" id="session-empty-row"><td colspan="2">No caches.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="memory-panel-wrap">
+        <button type="button" class="btn-memory-clear btn-clear-result" id="btn-clear-result" title="결과 · 목록 보기 · 개별 삭제">
+          <span class="btn-memory-icon">📄</span>
+          <span class="btn-memory-label">Results</span>
+        </button>
+        <div class="memory-dropdown" id="result-dropdown" aria-hidden="true">
+          <div class="data-vars-dropdown-header">결과 · Task list</div>
+          <div class="data-vars-table-wrap">
+            <table class="data-vars-table">
+              <thead><tr><th class="data-vars-th-name">Name</th><th class="data-vars-th-memory">Model · Level</th><th class="data-vars-th-action"></th></tr></thead>
+              <tbody id="result-tbody">
+                <tr class="data-vars-empty-row" id="result-empty-row"><td colspan="3">No items.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="memory-panel-wrap">
+        <button type="button" class="btn-memory-clear btn-clear-variable" id="btn-clear-variable" title="Variables · 목록 보기 · 개별 삭제">
+          <span class="btn-memory-icon">🧊</span>
+          <span class="btn-memory-label">Variables</span>
+        </button>
+        <div class="memory-dropdown data-vars-dropdown" id="data-vars-dropdown" aria-hidden="true">
+          <div class="data-vars-dropdown-header">Variables · Loaded model &amp; saved data</div>
+          <div class="data-vars-table-wrap">
+            <table class="data-vars-table">
+              <thead><tr><th class="data-vars-th-name">Name</th><th class="data-vars-th-memory">Memory (GPU / RAM)</th><th class="data-vars-th-action"></th></tr></thead>
+              <tbody id="data-vars-tbody">
+                <tr class="data-vars-empty-row" id="data-vars-empty-row"><td colspan="3" id="data-vars-empty">No items.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="memory-summary-wrap" id="memory-summary-wrap" title="Session | Result | Variable memory (GB)">
+        <span class="memory-summary-label">Session</span><span class="memory-summary-value" id="memory-summary-session">—</span>
+        <span class="memory-summary-sep">|</span>
+        <span class="memory-summary-label">Result</span><span class="memory-summary-value" id="memory-summary-result">—</span>
+        <span class="memory-summary-sep">|</span>
+        <span class="memory-summary-label">Variable</span><span class="memory-summary-value" id="memory-summary-variable">—</span>
+      </div>
+    </div>
+  </div>
   <div class="app-title-bar-right">
-    <button type="button" class="btn-empty-cache" id="btn-empty-cache" title="Clear loaded model and CUDA cache (reset)">Empty Cache</button>
     <div class="json-wrap">
       <button type="button" class="btn-json" id="btn-json" title="Hover for Export/Import">Json</button>
       <div class="json-dropdown" id="json-dropdown">
@@ -23,32 +86,27 @@
       <span>Version 0.1</span>
       <span>(c) KAIST-SAIL</span>
     </div>
-    <div class="data-vars-wrap">
-      <button type="button" class="btn-data-vars" id="btn-data-vars" title="Saved data variables (global state)" aria-label="Data variables">
-        <span class="btn-data-vars-label">Variables</span>
-      </button>
-      <div class="data-vars-dropdown" id="data-vars-dropdown" aria-hidden="true">
-        <div class="data-vars-dropdown-header">Variables · Loaded model &amp; saved data</div>
-        <div class="data-vars-table-wrap">
-          <table class="data-vars-table">
-            <thead>
-              <tr>
-                <th class="data-vars-th-name">Name</th>
-                <th class="data-vars-th-memory">Memory (GPU / RAM)</th>
-                <th class="data-vars-th-action"></th>
-              </tr>
-            </thead>
-            <tbody id="data-vars-tbody">
-              <tr class="data-vars-empty-row" id="data-vars-empty-row">
-                <td colspan="3" id="data-vars-empty">No items.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-    <button type="button" class="btn-right-panel" id="btn-right-panel" title="Toggle right panel" aria-label="Toggle panel">
-      <svg class="icon-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-    </button>
   </div>
+  <script>
+  (function() {
+    function initVariableBtn() {
+      var b = document.getElementById("btn-clear-variable");
+      var dd = document.getElementById("data-vars-dropdown");
+      if (!b || !dd) return;
+      b.addEventListener("click", function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        var isOpen = dd.classList.contains("visible");
+        if (isOpen) { dd.classList.remove("visible"); dd.setAttribute("aria-hidden", "true"); }
+        else {
+          if (typeof window.refreshWorkingMemoryList === "function") window.refreshWorkingMemoryList();
+          dd.classList.add("visible");
+          dd.setAttribute("aria-hidden", "false");
+        }
+      });
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initVariableBtn);
+    else initVariableBtn();
+  })();
+  </script>
 </header>

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ task.title }} - PnP-XAI-LLM</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem('pnp-xai-theme')||'light';</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/xai_2/xai_2.css') }}" />
+</head>
+<body>
+  {% set export_as_link = true %}
+  {% include 'header.html' with context %}
+
+  <div class="main-layout">
+    {% set is_index = false %}
+    {% include 'sidebar.html' with context %}
+
+    <main class="content-area">
+      <div class="content-toolbar">
+        <button type="button" class="btn-run" id="btn-run">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          RUN
+        </button>
+        <span id="generation-status" class="generation-status" aria-live="polite"></span>
+        <button type="button" class="input-setting-trigger" id="input-setting-trigger" title="Task, Model, Treatment, Name" data-task-type="Residual Concept Detection" data-task-name="{{ task.name or task.title or '' }}" data-task-model="{{ task.model or '' }}" data-task-treatment="{{ task.treatment or '' }}">
+          Residual Concept Detection | {{ task.model or '—' }} | {{ task.treatment or 'None' }} | {{ task.name or task.title or '—' }}
+        </button>
+      </div>
+
+      <div class="input-setting-panel" id="input-setting-panel">
+        <div class="input-setting-body" id="input-setting-body">
+          <p class="input-setting-hint">Residual Concept Detection: uses saved dataset variable and loaded model. Forward hooks extract block outputs; positive − negative mean gives direction per layer. Output: (num_layers, model_dim) vectors.</p>
+          <div class="input-setting-form input-setting-form-row residual-concept-form">
+            <div class="input-setting-cell">
+              <label for="input-variable-name">Dataset Variable</label>
+              <select id="input-variable-name" name="variable_name" data-task-input="variable_name" class="input-setting-field">
+                <option value="">— Select saved variable —</option>
+              </select>
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-text-key">Text Key</label>
+              <input type="text" id="input-text-key" name="text_key" data-task-input="text_key" class="input-setting-field" placeholder="e.g. text" value="{{ (task.result or {}).get('text_key', 'text') }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-label-key">Label Key</label>
+              <input type="text" id="input-label-key" name="label_key" data-task-input="label_key" class="input-setting-field" placeholder="e.g. label" value="{{ (task.result or {}).get('label_key', 'label') }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-positive-label">Positive Label</label>
+              <input type="text" id="input-positive-label" name="positive_label" data-task-input="positive_label" class="input-setting-field" placeholder="e.g. 1" value="{{ (task.result or {}).get('positive_label', '1') }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-negative-label">Negative Label</label>
+              <input type="text" id="input-negative-label" name="negative_label" data-task-input="negative_label" class="input-setting-field" placeholder="e.g. 0" value="{{ (task.result or {}).get('negative_label', '0') }}" />
+            </div>
+            <div class="input-setting-cell input-setting-cell-wide">
+              <p class="input-setting-hint">Layer Config: Hover over <strong>Loaded Model</strong> in the left sidebar to set Layers, attn, mlp, o_proj, down_proj. Those values are used when RUN.</p>
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-token-location">Token Location</label>
+              <select id="input-token-location-mode" class="input-setting-field" data-task-input="token_location_mode">
+                <option value="full" {{ 'selected' if (task.result or {}).get('token_location_mode', 'full') == 'full' else '' }}>Full (mean over all tokens)</option>
+                <option value="ids" {{ 'selected' if (task.result or {}).get('token_location_mode') == 'ids' else '' }}>Specific token IDs</option>
+              </select>
+            </div>
+            <div class="input-setting-cell" id="input-token-ids-wrap" style="display:none;">
+              <label for="input-token-ids">Token IDs</label>
+              <input type="text" id="input-token-ids" name="token_ids" data-task-input="token_ids" class="input-setting-field" placeholder="e.g. 0,1,2 or 0" value="{{ (task.result or {}).get('token_ids', '') }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-batch-size">Batch Size</label>
+              <input type="number" id="input-batch-size" name="batch_size" data-task-input="batch_size" class="input-setting-field" min="1" max="128" step="1" value="{{ (task.result or {}).get('batch_size', 8) }}" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="results-area">
+        {% if task.result and ((task.result or {}).get('directions') is not none or (task.result or {}).get('direction_vectors') is not none) %}
+        <div class="results-content visible" id="results-content">
+          <div class="results-completion-wrap">
+            <h3>Residual Direction Vectors</h3>
+            {% set dirs = (task.result or {}).get('directions') %}
+            {% set layer_names = (task.result or {}).get('layer_names') or [] %}
+            {% set vecs = (task.result or {}).get('direction_vectors') or [] %}
+            {% set num_keys = (task.result or {}).get('num_keys') or (dirs | length if dirs else layer_names | length) %}
+            {% set model_dim = (task.result or {}).get('model_dim') or ((dirs.values() | list)[0] | length if dirs and dirs.values() else (vecs[0] | length if vecs else 0)) %}
+            <p><strong>Keys:</strong> {{ num_keys }} · <strong>Dimension:</strong> {{ model_dim }}</p>
+            <p>Format: <code>{ module: dimension }</code></p>
+            <p>Modules: {% if dirs %}{{ (dirs.keys() | list)[:2] | join(', ') }}{% if dirs | length > 2 %} … ({{ dirs | length }} keys){% endif %}{% else %}{{ layer_names[:2] | join(', ') }}{% if layer_names | length > 2 %} … ({{ layer_names | length }}){% endif %}{% endif %}</p>
+            <p>Positive: {{ task.result.n_positive | default(0) }} · Negative: {{ task.result.n_negative | default(0) }} · Batches: {{ task.result.num_batches | default(0) }}</p>
+            <div class="residual-save-row">
+              <button type="button" class="btn-save-residual-var" id="btn-save-residual-var" data-has-result="true">Save To Variable</button>
+              <input type="text" id="residual-var-additional-naming" class="residual-var-additional-input" placeholder="Additional naming (optional)" value="" />
+            </div>
+            <details class="results-completion-meta">
+              <summary>Parameters &amp; full result</summary>
+              <pre class="results-json">{{ task.result | tojson(indent=2) }}</pre>
+            </details>
+          </div>
+        </div>
+        <div class="results-placeholder hidden" id="results-placeholder"></div>
+        {% else %}
+        <div class="results-placeholder" id="results-placeholder">
+          <span class="brand-title">PnP-XAI-LLM</span>
+          <ul class="feature-list">
+            <li>Residual Concept Detection: select a saved dataset variable, set text/label keys and positive/negative labels.</li>
+            <li>Hover over <strong>Loaded Model</strong> (left sidebar) to configure Layers, attn, mlp, o_proj, down_proj. Match defaults or enter "please find name" to correct.</li>
+            <li>Token location: full (mean) or specific token IDs.</li>
+            <li>RUN to compute positive − negative direction vectors per layer. Output shape: (num_layers, model_dim).</li>
+          </ul>
+        </div>
+        <div class="results-content" id="results-content"></div>
+        {% endif %}
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-confirm-load">
+    <div class="modal-dialog">
+      <h3>Confirm Model Load</h3>
+      <p id="modal-message">Loaded Model + Treatment does not match the current session. Load the model with this setting?</p>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-cancel" id="modal-cancel">Cancel</button>
+        <button type="button" class="modal-btn-confirm" id="modal-confirm">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/working_memory.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/memory_panels.js') }}"></script>
+  <script>window.PNP_CURRENT_TASK_ID = {{ task.id | tojson }}; window.PNP_CURRENT_TASK_LEVEL = {{ task.xai_level | tojson }}; {% if task.result and ((task.result or {}).get('directions') or (task.result or {}).get('direction_vectors')) %}window.PNP_LAST_RESIDUAL_RESULT = {{ (task.result or {}) | tojson }};{% endif %}</script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script>
+  (function() {
+    var variableSelect = document.getElementById("input-variable-name");
+    var tokenModeSelect = document.getElementById("input-token-location-mode");
+    var tokenIdsWrap = document.getElementById("input-token-ids-wrap");
+
+    function loadVariableOptions() {
+      if (!variableSelect) return;
+      fetch("/api/data-vars").then(function(r) { return r.json(); }).then(function(data) {
+        var variables = data.variables || [];
+        variableSelect.innerHTML = '<option value="">— Select saved variable —</option>';
+        variables.forEach(function(v) {
+          var opt = document.createElement("option");
+          opt.value = v.name || "";
+          opt.textContent = (v.name || "") + (v.task_name ? " (" + v.task_name + ")" : "");
+          variableSelect.appendChild(opt);
+        });
+        var saved = {{ (task.result or {}).get('variable_name', '') | tojson }};
+        if (saved && variableSelect.querySelector('option[value="' + String(saved).replace(/"/g, '&quot;') + '"]')) {
+          variableSelect.value = saved;
+        }
+      }).catch(function() {});
+    }
+    loadVariableOptions();
+    if (typeof window.refreshSidebarVariableList === "function") {
+      var orig = window.refreshSidebarVariableList;
+      window.refreshSidebarVariableList = function() {
+        orig();
+        loadVariableOptions();
+      };
+    }
+
+    function toggleTokenIds() {
+      if (tokenIdsWrap && tokenModeSelect) {
+        tokenIdsWrap.style.display = tokenModeSelect.value === "ids" ? "block" : "none";
+      }
+    }
+    if (tokenModeSelect) tokenModeSelect.addEventListener("change", toggleTokenIds);
+    toggleTokenIds();
+
+    document.addEventListener("click", function(e) {
+      var btn = e.target && e.target.closest(".btn-save-residual-var");
+      if (!btn) return;
+      var res = window.PNP_LAST_RESIDUAL_RESULT;
+      var directions = res && res.directions;
+      if (!directions && res && res.direction_vectors && res.layer_names) {
+        directions = {};
+        for (var i = 0; i < res.layer_names.length; i++) {
+          directions[res.layer_names[i]] = res.direction_vectors[i] || [];
+        }
+      }
+      if (!res || !directions) {
+        alert("No residual result to save. Run first.");
+        return;
+      }
+      var wrap = btn.closest(".results-completion-wrap");
+      var input = wrap ? wrap.querySelector(".residual-var-additional-input") : null;
+      var additional = input && input.value ? input.value.trim() : "";
+      var taskName = document.querySelector(".input-setting-trigger") && document.querySelector(".input-setting-trigger").dataset.taskName || "Residual";
+      var modelEl = document.getElementById("sidebar-model");
+      var model = (modelEl && modelEl.value) || "";
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+      fetch("/api/residual-vars/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          directions: directions,
+          task_name: taskName,
+          model: model,
+          num_keys: res.num_keys || Object.keys(directions).length,
+          model_dim: res.model_dim || (Object.values(directions)[0] && Object.values(directions)[0].length) || 0,
+          additional_naming: additional || undefined,
+        }),
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        btn.disabled = false;
+        btn.textContent = "Variable Saved ✓";
+        if (typeof window.refreshWorkingMemoryList === "function") window.refreshWorkingMemoryList();
+        if (typeof window.refreshSidebarVariableList === "function") window.refreshSidebarVariableList();
+        if (typeof window.refreshMemorySummary === "function") window.refreshMemorySummary();
+        setTimeout(function() { btn.textContent = "Save To Variable"; }, 2000);
+      }).catch(function(err) {
+        btn.disabled = false;
+        btn.textContent = "Save To Variable";
+        alert("Save failed: " + (err.message || "Unknown error"));
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

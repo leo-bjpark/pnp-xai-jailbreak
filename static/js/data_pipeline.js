@@ -294,6 +294,7 @@
         }
         showMessage(loadMessage, "Loaded: " + (data.dataset_info?.splits?.join(", ") || path), "success");
         setStatus("loaded");
+        if (typeof updateSaveButtonState === "function") updateSaveButtonState();
         const code = (processingCodeTextarea && processingCodeTextarea.value) || "";
         renderBatch(data.dataset_info, path, window.PNP_PROCESSED_DATASET_INFO || null, code);
       } catch (err) {
@@ -323,6 +324,7 @@
         }
         showMessage(processingMessage, "Processing applied.", "success");
         setStatus("processed");
+        if (typeof updateSaveButtonState === "function") updateSaveButtonState();
         currentProcessedInfo = data.processed_dataset_info || null;
         currentProcessingCode = code;
         window.PNP_PROCESSED_DATASET_INFO = currentProcessedInfo;
@@ -338,7 +340,17 @@
   }
 
   const SAVE_BTN_LABEL = "Save To Variable";
+  function updateSaveButtonState() {
+    const status = statusEl ? statusEl.textContent : "";
+    if (btnSaveDataVar) {
+      btnSaveDataVar.disabled = status !== "processed";
+      btnSaveDataVar.title = status === "processed"
+        ? "Save processed data to Variable"
+        : "Load → Apply Processing → Save (Apply Processing first)";
+    }
+  }
   if (btnSaveDataVar) {
+    updateSaveButtonState();
     btnSaveDataVar.addEventListener("click", async () => {
       const btn = btnSaveDataVar;
       const originalText = btn.textContent;
@@ -353,15 +365,17 @@
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Save failed");
-        if (typeof window.refreshDataVarsList === "function") window.refreshDataVarsList();
+        if (typeof window.refreshWorkingMemoryList === "function") window.refreshWorkingMemoryList();
+        if (typeof window.refreshMemorySummary === "function") window.refreshMemorySummary();
+        if (typeof window.refreshSidebarVariableList === "function") window.refreshSidebarVariableList();
         btn.textContent = "Variable Saved ✅";
         setTimeout(() => {
           btn.textContent = SAVE_BTN_LABEL;
-          btn.disabled = false;
+          updateSaveButtonState();
         }, 2000);
       } catch (err) {
         btn.textContent = originalText;
-        btn.disabled = false;
+        updateSaveButtonState();
         alert("Save failed: " + err.message);
       }
     });

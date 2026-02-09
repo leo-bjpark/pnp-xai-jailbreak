@@ -4,7 +4,6 @@ PnP-XAI-LLM - VSCode-like XAI analysis tool.
 
 import json
 import sys
-import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -13,7 +12,10 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from flask import Flask, jsonify, redirect, render_template, request
+from queue import Empty, Queue
+from threading import Thread
+
+from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context
 
 # Model list and loading via python.model_load (reads config.yaml, uses backup.utils internally)
 from python.model_load import clear_model_cache, get_config_models, get_config_models_grouped, load_model, get_model_status
@@ -28,6 +30,7 @@ from python.session_store import (
     delete_task,
     get_raw_memory,
     import_memory,
+    TASKS_FILE,
 )
 from python.dataset_pipeline_store import (
     get_pipelines,
@@ -36,21 +39,17 @@ from python.dataset_pipeline_store import (
     update_pipeline as update_pipeline_store,
     delete_pipeline,
 )
+from python.memory import cache_store, task_result_store, variable_store
+from python.memory.variable import (
+    summarize_for_panel,
+    save_pipeline_variable,
+    save_residual_variable,
+    get_residual_variable,
+    delete_variable as wm_delete_variable,
+    clear_all as wm_clear_all,
+)
 
 app = Flask(__name__)
-
-# In-memory session: current Loaded Model + Treatment
-# Used for memory-efficient management and run confirmation
-SESSION_STATE = {
-    "loaded_model": None,
-    "treatment": None,
-}
-
-# Conversation cache for 0.1.2: conversation_id -> {"model_key": str, "messages": [{"role", "content"}]}
-CONVERSATION_CACHE = {}
-
-# Global saved data variables: variable_name (dataName/split/randomN/seed/taskName) -> snapshot
-SAVED_DATA_VARS = {}
 
 
 @app.get("/panel")
@@ -106,12 +105,16 @@ def task_view(task_id):
 def _task_template(level_key: str) -> str:
     """Template name for task view by XAI level."""
     if level_key == "0.1.1":
-        return "XAI_0_1_1_completion.html"
+        return "xai_0/completion.html"
     if level_key == "0.1.2":
-        return "XAI_0_1_2_conversation.html"
+        return "xai_0/conversation.html"
     if level_key == "1.0.1":
-        return "XAI_1_1_response_attribution.html"
-    return "XAI_not_implemented.html"
+        return "xai_1/response_attribution.html"
+    if level_key == "2.0.1":
+        return "xai_2/residual_concept_detection.html"
+    if level_key == "2.0.2":
+        return "xai_2/layer_direction_similarity.html"
+    return "xai_2/not_implemented.html"
 
 
 def _render_task(task_id: str, level_key: str):
@@ -257,9 +260,10 @@ def api_delete_task(task_id):
 @app.get("/api/session")
 def api_get_session():
     """Return current session state: loaded_model, treatment."""
+    sess = cache_store.get_session()
     return jsonify({
-        "loaded_model": SESSION_STATE["loaded_model"],
-        "treatment": SESSION_STATE["treatment"],
+        "loaded_model": sess["loaded_model"],
+        "treatment": sess["treatment"],
     })
 
 
@@ -269,8 +273,7 @@ def api_set_session():
     data = request.get_json(force=True) or {}
     model = data.get("loaded_model")
     treatment = data.get("treatment", "")
-    SESSION_STATE["loaded_model"] = model
-    SESSION_STATE["treatment"] = treatment
+    cache_store.set_session(model, treatment)
     return jsonify({"status": "ok"})
 
 
@@ -286,16 +289,168 @@ def api_load_model():
     """Load model and update session."""
     data = request.get_json(force=True) or {}
     model_key = data.get("model", "")
-    treatment = data.get("treatment", SESSION_STATE.get("treatment") or "")
+    treatment = data.get("treatment", cache_store.get_session().get("treatment") or "")
     if not model_key:
         return jsonify({"error": "model required"}), 400
     try:
         load_model(model_key)
-        SESSION_STATE["loaded_model"] = model_key
-        SESSION_STATE["treatment"] = treatment
+        cache_store.set_session(model_key, treatment)
         return jsonify({"status": "ok", "model": model_key})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
+
+
+def _detect_layer_structure(model):
+    """
+    Inspect model to detect layers_base, attn_name, mlp_name, o_proj_name, down_proj_name.
+    Returns dict with detected values; if a name doesn't match default, value is None.
+    Defaults: self_attn, mlp, o_proj, down_proj.
+    """
+    DEFAULT_ATTN = "self_attn"
+    DEFAULT_MLP = "mlp"
+    DEFAULT_O_PROJ = "o_proj"
+    DEFAULT_DOWN_PROJ = "down_proj"
+
+    result = {
+        "layers_base": None,
+        "attn_name": None,
+        "mlp_name": None,
+        "o_proj_name": None,
+        "down_proj_name": None,
+    }
+    layer_names = []
+    for name, _ in model.named_modules():
+        if not name or "layers." not in name and ".layers." not in name:
+            continue
+        parts = name.split(".")
+        if parts[-1].isdigit():
+            layer_names.append(name)
+    layer_names = sorted(set(layer_names), key=lambda x: (x.count("."), x))
+    if not layer_names:
+        return result
+    first = layer_names[0]
+    if "." in first:
+        base, idx = first.rsplit(".", 1)
+        if idx.isdigit():
+            result["layers_base"] = base
+
+    prefix = result["layers_base"] + ".0."
+    attn_candidates = {DEFAULT_ATTN, "attention", "self_attention"}
+    mlp_candidates = {DEFAULT_MLP}
+
+    first_layer_children = set()
+    for name, _ in model.named_modules():
+        if not name or not name.startswith(prefix):
+            continue
+        rest = name[len(prefix) :]
+        if "." in rest:
+            first_layer_children.add(rest.split(".")[0])
+        else:
+            first_layer_children.add(rest)
+
+    for c in first_layer_children:
+        if c in attn_candidates:
+            result["attn_name"] = c
+            break
+    if result["attn_name"] is None and first_layer_children:
+        for c in first_layer_children:
+            if "attn" in c.lower():
+                result["attn_name"] = c
+                break
+
+    for c in first_layer_children:
+        if c in mlp_candidates:
+            result["mlp_name"] = c
+            break
+    if result["mlp_name"] is None and first_layer_children:
+        for c in first_layer_children:
+            if "mlp" in c.lower():
+                result["mlp_name"] = c
+                break
+
+    attn_prefix = prefix + (result["attn_name"] or DEFAULT_ATTN) + "."
+    mlp_prefix = prefix + (result["mlp_name"] or DEFAULT_MLP) + "."
+    for name, _ in model.named_modules():
+        if not name:
+            continue
+        if name.startswith(attn_prefix) and name.endswith("." + DEFAULT_O_PROJ):
+            result["o_proj_name"] = DEFAULT_O_PROJ
+            break
+        if name == attn_prefix + DEFAULT_O_PROJ:
+            result["o_proj_name"] = DEFAULT_O_PROJ
+            break
+    if result["o_proj_name"] is None:
+        for name, _ in model.named_modules():
+            if attn_prefix in name and "o_proj" in name:
+                result["o_proj_name"] = "o_proj"
+                break
+
+    for name, _ in model.named_modules():
+        if not name:
+            continue
+        if name.startswith(mlp_prefix) and name.endswith("." + DEFAULT_DOWN_PROJ):
+            result["down_proj_name"] = DEFAULT_DOWN_PROJ
+            break
+        if name == mlp_prefix + DEFAULT_DOWN_PROJ:
+            result["down_proj_name"] = DEFAULT_DOWN_PROJ
+            break
+
+    return result
+
+
+def _empty_layer_structure():
+    """Empty layer structure when detection fails."""
+    return {
+        "layers_base": None,
+        "attn_name": None,
+        "mlp_name": None,
+        "o_proj_name": None,
+        "down_proj_name": None,
+    }
+
+
+@app.get("/api/model_layer_names")
+def api_model_layer_names():
+    """Return layer structure for the given model (layers_base, attn, mlp, o_proj, down_proj)."""
+    model_key = request.args.get("model", "").strip()
+    if not model_key:
+        return jsonify({"error": "model query param required"}), 400
+    try:
+        from python.model_load import load_llm
+        tokenizer, model = load_llm(model_key)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    try:
+        names = []
+        for name, _ in model.named_modules():
+            if not name:
+                continue
+            if "layers." in name or ".layers." in name:
+                parts = name.split(".")
+                if parts[-1].isdigit():
+                    names.append(name)
+        names = sorted(set(names), key=lambda x: (x.count("."), x))
+        layers_base = ""
+        if names:
+            first = names[0]
+            if "." in first:
+                base, idx = first.rsplit(".", 1)
+                if idx.isdigit():
+                    layers_base = base
+        structure = _detect_layer_structure(model)
+        if layers_base and not structure.get("layers_base"):
+            structure["layers_base"] = layers_base
+        return jsonify({
+            "layer_names": names,
+            "layers_base": layers_base,
+            "layer_structure": structure,
+        })
+    except Exception:
+        return jsonify({
+            "layer_names": [],
+            "layers_base": "",
+            "layer_structure": _empty_layer_structure(),
+        })
 
 
 @app.get("/api/model_status")
@@ -340,7 +495,7 @@ def api_memory_export():
     """Export full memory as JSON (for download)."""
     from flask import Response
     data = get_raw_memory()
-    data["session"] = SESSION_STATE.copy()
+    data["session"] = cache_store.get_session().copy()
     # Filename: XAI_Level_Export_{timestamp}.json
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Response(
@@ -359,8 +514,7 @@ def api_memory_import():
     # Optionally restore session from imported data
     sess = data.get("session")
     if isinstance(sess, dict):
-        SESSION_STATE["loaded_model"] = sess.get("loaded_model")
-        SESSION_STATE["treatment"] = sess.get("treatment")
+        cache_store.set_session(sess.get("loaded_model"), sess.get("treatment") or "")
     return jsonify({"status": "ok"})
 
 
@@ -380,8 +534,9 @@ def api_run():
     input_setting = data.get("input_setting", {})
 
     # Check session consistency
-    current_model = SESSION_STATE.get("loaded_model")
-    current_treatment = SESSION_STATE.get("treatment")
+    sess = cache_store.get_session()
+    current_model = sess.get("loaded_model")
+    current_treatment = sess.get("treatment")
 
     if model != current_model or treatment != current_treatment:
         return jsonify({
@@ -391,188 +546,280 @@ def api_run():
             "current": {"model": current_model, "treatment": current_treatment},
         }), 400
 
-    # Conversation (0.1.2): cache-backed multi-turn chat; return input_tokens, generated_tokens, conversation_id
-    conversation_id = input_setting.get("conversation_id") or None
-    content = (input_setting.get("content") or "").strip()
+    # Conversation (0.1.2): messages from JS (client-side cache)
     messages_input = input_setting.get("messages")
     system_instruction = (input_setting.get("system_instruction") or "").strip()
 
-    def _ensure_system_at_start(messages: list) -> list:
-        """Put current system_instruction at the very start of messages (strip any existing leading system)."""
-        if not system_instruction:
-            return messages
-        # Drop any existing leading system message so we use the current one
-        rest = messages
-        while rest and (rest[0].get("role") or "").lower() == "system":
-            rest = rest[1:]
-        return [{"role": "system", "content": system_instruction}] + rest
+    if current_model and messages_input and isinstance(messages_input, list):
+        from python.routes.xai_0 import run_conversation
 
-    # Enter conversation branch when there is new content or a full messages list (first message has content but no id)
-    if current_model and (content or (messages_input and isinstance(messages_input, list))):
-        try:
-            from python.model_generation import chat_completion, get_cache_token_count, get_text_token_count
-            temperature = float(input_setting.get("temperature", 0.7))
-            max_new_tokens = int(input_setting.get("max_new_tokens", 256))
-            top_p = float(input_setting.get("top_p", 1.0))
-            top_k = int(input_setting.get("top_k", 50))
-        except (TypeError, ValueError):
-            return jsonify({"error": "Invalid input_setting: temperature, max_new_tokens, top_p, top_k must be numbers"}), 400
-
-        if conversation_id and content:
-            cached = CONVERSATION_CACHE.get(conversation_id)
-            if not cached or cached.get("model_key") != current_model:
-                messages = _ensure_system_at_start([{"role": "user", "content": content}])
-                conversation_id = None
-            else:
-                messages = _ensure_system_at_start(
-                    list(cached["messages"]) + [{"role": "user", "content": content}]
-                )
-        elif content:
-            messages = _ensure_system_at_start([{"role": "user", "content": content}])
-            conversation_id = None
-        elif messages_input:
-            messages = [{"role": m.get("role", "user"), "content": (m.get("content") or "").strip()} for m in messages_input if (m.get("content") or "").strip()]
-            if not messages:
-                return jsonify({"error": "messages must contain at least one non-empty message"}), 400
-            messages = _ensure_system_at_start(messages)
-            conversation_id = None
-        else:
-            return jsonify({"error": "Provide conversation_id and content, or messages list"}), 400
-
-        try:
-            input_tokens = get_cache_token_count(current_model, messages)
-            do_sample = temperature > 0
-            generated_text = chat_completion(
-                model_key=current_model,
-                messages=messages,
-                max_new_tokens=max_new_tokens,
-                do_sample=do_sample,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-            )
-            generated_tokens = get_text_token_count(current_model, generated_text)
-            messages.append({"role": "assistant", "content": generated_text})
-            if conversation_id is None:
-                conversation_id = str(uuid.uuid4())
-            CONVERSATION_CACHE[conversation_id] = {"model_key": current_model, "messages": messages}
-
-            # conversation_list for saving/restore: instruction + messages as user/ai
-            conversation_list = {
-                "instruction": system_instruction,
-                "messages": [
-                    {"role": "user" if m.get("role") == "user" else "ai", "content": (m.get("content") or "").strip()}
-                    for m in messages
-                    if (m.get("role") or "").lower() in ("user", "assistant")
-                ],
-            }
-
-            result = {
-                "status": "ok",
-                "model": model,
-                "treatment": treatment,
-                "generated_text": generated_text,
-                "input_tokens": input_tokens,
-                "generated_tokens": generated_tokens,
-                "conversation_id": conversation_id,
-                "cache_message_count": len(messages),
-                "conversation_list": conversation_list,
-                "temperature": temperature,
-                "max_new_tokens": max_new_tokens,
-                "top_p": top_p,
-                "top_k": top_k,
-            }
-            return jsonify(result)
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+        result, status = run_conversation(
+            model=model,
+            treatment=treatment,
+            current_model=current_model,
+            messages_input=messages_input,
+            system_instruction=system_instruction,
+            input_setting=input_setting,
+        )
+        return jsonify(result), status
 
     # Completion (0.1.1) or Response Attribution (1.0.1): input_string + generation params
     input_string = (input_setting.get("input_string") or "").strip()
     system_instruction = (input_setting.get("system_instruction") or "").strip()
     attribution_method = (input_setting.get("attribution_method") or "").strip()
-    if "input_string" in input_setting and current_model:
-        try:
-            temperature = float(input_setting.get("temperature", 0.7))
-            max_new_tokens = int(input_setting.get("max_new_tokens", 256))
-            top_p = float(input_setting.get("top_p", 1.0))
-            top_k = int(input_setting.get("top_k", 50))
-        except (TypeError, ValueError):
-            return jsonify({"error": "Invalid input_setting: temperature, max_new_tokens, top_p, top_k must be numbers"}), 400
-        if attribution_method:
-            try:
-                from python.xai_1.input_attribution import compute_input_attribution
-                result = compute_input_attribution(
-                    model_key=current_model,
-                    input_string=input_string,
-                    system_instruction=system_instruction,
-                    temperature=temperature,
-                    max_new_tokens=max_new_tokens,
-                    top_p=top_p,
-                    top_k=top_k,
-                    attribution_method=attribution_method,
-                )
-                result["status"] = "ok"
-                result["model"] = model
-                result["treatment"] = treatment
-                return jsonify(result)
-            except Exception as e:
-                return jsonify({"error": str(e)}), 500
-        try:
-            from python.model_generation import text_completion
-            generated_text = text_completion(
-                model_key=current_model,
-                prompt=input_string,
-                temperature=temperature,
-                max_new_tokens=max_new_tokens,
-                top_p=top_p,
-                top_k=top_k,
-            )
-            result = {
-                "status": "ok",
-                "model": model,
-                "treatment": treatment,
-                "input_string": input_string,
-                "temperature": temperature,
-                "max_new_tokens": max_new_tokens,
-                "top_p": top_p,
-                "top_k": top_k,
-                "generated_text": generated_text,
-            }
-            return jsonify(result)
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
 
-    # Fallback: placeholder for other levels
-    result = {
-        "status": "ok",
-        "message": "Analysis complete. (Actual XAI computation to be implemented)",
-        "model": model,
-        "treatment": treatment,
-        "input_setting": input_setting,
-    }
-    return jsonify(result)
+    if "input_string" in input_setting and current_model:
+        if attribution_method:
+            from python.routes.xai_1 import run_attribution
+
+            result, status = run_attribution(
+                model=model,
+                treatment=treatment,
+                current_model=current_model,
+                input_string=input_string,
+                system_instruction=system_instruction,
+                attribution_method=attribution_method,
+                input_setting=input_setting,
+            )
+            return jsonify(result), status
+        from python.routes.xai_0 import run_completion
+
+        result, status = run_completion(
+            model=model,
+            treatment=treatment,
+            current_model=current_model,
+            input_string=input_string,
+            input_setting=input_setting,
+        )
+        return jsonify(result), status
+
+    # Residual Concept Detection (2.0.1)
+    if (input_setting.get("variable_name") or "").strip() and current_model:
+        from python.routes.xai_2 import run_residual_concept
+
+        result, status = run_residual_concept(
+            model=model,
+            input_setting=input_setting,
+            load_dataset_fn=_load_pipeline_dataset,
+            progress_callback=None,
+        )
+        return jsonify(result), status
+
+    # Fallback: placeholder for other levels (xai_2+)
+    from python.routes.xai_2 import run_placeholder
+
+    result, status = run_placeholder(
+        model=model,
+        treatment=treatment,
+        input_setting=input_setting,
+    )
+    return jsonify(result), status
+
+
+@app.post("/api/run/residual-concept-stream")
+def api_run_residual_concept_stream():
+    """
+    Residual Concept Detection with SSE progress stream.
+    Same body as /api/run. Streams: data: {"type":"progress","batch":n,"total":m}\n\n
+    Final: data: {"type":"done","result":{...}}\n\n
+    """
+    data = request.get_json(force=True) or {}
+    model = data.get("model", "")
+    treatment = data.get("treatment", "")
+    input_setting = data.get("input_setting", {})
+
+    sess = cache_store.get_session()
+    current_model = sess.get("loaded_model")
+    current_treatment = sess.get("treatment")
+
+    if model != current_model or treatment != current_treatment:
+        def err_gen():
+            yield f"data: {json.dumps({'type': 'error', 'error': 'session_mismatch'})}\n\n"
+        return Response(
+            stream_with_context(err_gen()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    if not (input_setting.get("variable_name") or "").strip() or not current_model:
+        def err_gen():
+            yield f"data: {json.dumps({'type': 'error', 'error': 'variable_name required'})}\n\n"
+        return Response(
+            stream_with_context(err_gen()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    queue = Queue()
+    result_holder = {}
+    error_holder = {}
+
+    def progress_cb(batch, total):
+        queue.put({"type": "progress", "batch": batch, "total": total, "message": f"Forward batch {batch}/{total}"})
+
+    def run_thread():
+        with app.app_context():
+            try:
+                from python.routes.xai_2 import run_residual_concept
+
+                res, status = run_residual_concept(
+                    model=model,
+                    input_setting=input_setting,
+                    load_dataset_fn=_load_pipeline_dataset,
+                    progress_callback=progress_cb,
+                )
+                if status >= 400:
+                    error_holder["error"] = res.get("error", "Unknown error")
+                else:
+                    result_holder["result"] = res
+            except Exception as e:
+                error_holder["error"] = str(e)
+        queue.put({"type": "done"})
+
+    t = Thread(target=run_thread)
+    t.start()
+
+    def gen():
+        while True:
+            try:
+                msg = queue.get(timeout=300)
+            except Empty:
+                break
+            if msg["type"] == "done":
+                break
+            yield f"data: {json.dumps(msg)}\n\n"
+
+        if error_holder:
+            yield f"data: {json.dumps({'type': 'error', 'error': error_holder.get('error', 'Unknown')})}\n\n"
+        else:
+            result = result_holder.get("result", {})
+            try:
+                yield f"data: {json.dumps({'type': 'done', 'result': result})}\n\n"
+            except (TypeError, ValueError) as e:
+                yield f"data: {json.dumps({'type': 'error', 'error': f'Result serialize error: {e}'})}\n\n"
+
+    return Response(
+        stream_with_context(gen()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/conversation/clear")
 def api_conversation_clear():
-    """Clear server-side conversation cache for the given conversation_id (0.1.2)."""
+    """No-op: conversation cache is managed by JS."""
+    return jsonify({"status": "ok"})
+
+
+SESSION_CACHE_NAMESPACE = "session"
+
+
+@app.get("/api/memory/summary")
+def api_memory_summary():
+    """Return Session | Result | Variable memory usage in GB."""
+    session_gb = 0.0
+    result_gb = 0.0
+    variable_gb = 0.0
+
+    sess = cache_store.get_session()
+    loaded_model = sess.get("loaded_model")
+    session_caches = cache_store.list_session_caches()
+    if loaded_model and session_caches:
+        try:
+            status = get_model_status(loaded_model)
+            for dev in (status.get("device_status") or []):
+                gb = float(dev.get("memory_gb") or 0)
+                session_gb += gb
+        except Exception:
+            pass
+
+    if TASKS_FILE.exists():
+        result_gb = TASKS_FILE.stat().st_size / (1024**3)
+
+    var_summary = variable_store.summarize_for_panel(loaded_model_key=loaded_model)
+    if var_summary.get("loaded_model"):
+        lm = var_summary["loaded_model"]
+        g = lm.get("memory_gpu_gb")
+        r = lm.get("memory_ram_gb")
+        if g is not None:
+            variable_gb += float(g)
+        if r is not None:
+            variable_gb += float(r)
+    for v in var_summary.get("variables", []):
+        mb = v.get("memory_ram_mb")
+        if mb is not None:
+            variable_gb += float(mb) / 1024
+
+    return jsonify({
+        "session_gb": round(session_gb, 3),
+        "result_gb": round(result_gb, 3),
+        "variable_gb": round(variable_gb, 3),
+    })
+
+
+@app.get("/api/memory/session/list")
+def api_list_session_caches():
+    """List Session caches. Key = Task | model | treatment | 이름."""
+    items = cache_store.list_session_caches()
+    return jsonify({"caches": items})
+
+
+@app.post("/api/memory/session/register")
+def api_register_session_cache():
+    """Register a cache entry. Key = Task | model | treatment | 이름."""
     data = request.get_json(force=True) or {}
-    conversation_id = data.get("conversation_id")
-    if conversation_id and conversation_id in CONVERSATION_CACHE:
-        del CONVERSATION_CACHE[conversation_id]
+    task_id = (data.get("task_id") or "").strip()
+    model = (data.get("model") or "").strip()
+    treatment = (data.get("treatment") or "").strip()
+    name = (data.get("name") or "").strip()
+    if not task_id:
+        return jsonify({"error": "task_id required"}), 400
+    key = f"{task_id}|{model}|{treatment}|{name}"
+    cache_store.put(SESSION_CACHE_NAMESPACE, key, {"key_parts": [task_id, model, treatment, name]})
+    return jsonify({"status": "ok", "key": key})
+
+
+@app.delete("/api/memory/session/unregister/<path:key>")
+def api_unregister_session_cache(key: str):
+    """Unregister one cache entry."""
+    cache_store.delete(SESSION_CACHE_NAMESPACE, key)
+    return jsonify({"status": "ok"})
+
+
+@app.post("/api/memory/session/clear")
+def api_clear_session():
+    """Clear all Session caches (loaded model, treatment, all Python caches)."""
+    cache_store.terminate_all()
+    clear_model_cache()
+    return jsonify({"status": "ok"})
+
+
+@app.post("/api/memory/result/clear")
+def api_clear_result():
+    """Clear all Task Results (tasks.json)."""
+    xai_level_names = get_xai_level_names()
+    task_result_store.clear_all(xai_level_names)
+    return jsonify({"status": "ok"})
+
+
+@app.post("/api/memory/variable/clear")
+def api_clear_variable():
+    """Clear all Variables (working memory)."""
+    variable_store.clear_all()
     return jsonify({"status": "ok"})
 
 
 @app.post("/api/empty_cache")
 def api_empty_cache():
     """
-    Reset: clear loaded model, session state, conversation cache, and CUDA cache.
-    Call after user confirms Empty Cache (warning shown in UI).
+    Reset: clear loaded model, session state, conversation cache,
+    CUDA cache, and working‑memory variables.
+
+    Called after user confirms Empty Cache (warning shown in UI).
     """
-    SESSION_STATE["loaded_model"] = None
-    SESSION_STATE["treatment"] = None
-    CONVERSATION_CACHE.clear()
+    cache_store.terminate_all()
     clear_model_cache()
+    wm_clear_all()
     return jsonify({"status": "ok"})
 
 
@@ -851,84 +1098,32 @@ def api_load_hf_dataset(pipeline_id: str):
         return jsonify({"error": str(e)}), 500
 
 
-def _saved_var_name(path: str, split, random_n, seed, task_name: str, additional_naming: str = None) -> str:
-    """Build variable name: dataName/split/randomN/seed/taskName[/additionalNaming]."""
-    parts = [
-        (path or "").strip() or "-",
-        str(split).strip() if split is not None and str(split).strip() else "-",
-        str(random_n) if random_n is not None else "-",
-        str(seed) if seed is not None else "-",
-        (task_name or "").strip() or "-",
-    ]
-    base = "/".join(parts)
-    extra = (additional_naming or "").strip()
-    if extra:
-        return base + "/" + extra
-    return base
-
-
-def _estimate_data_var_memory_mb(data: dict) -> float:
-    """Rough estimate of saved variable size in MB (dataset_info + processed)."""
-    total_rows = 0
-    for info in (data.get("dataset_info"), data.get("processed_dataset_info")):
-        if not info:
-            continue
-        for n in (info.get("num_rows") or {}).values():
-            total_rows += int(n) if n is not None else 0
-    if total_rows == 0:
-        return 0.0
-    return round(total_rows * 0.0005, 2)  # ~500 bytes/row -> MB
-
-
 @app.get("/api/data-vars")
 def api_list_data_vars():
-    """List loaded model (with GPU/RAM) and saved data variables. Name | Memory (GPU/RAM) | Delete."""
-    loaded = SESSION_STATE.get("loaded_model")
-    loaded_model = None
-    if loaded:
-        try:
-            status = get_model_status(loaded)
-            gpu_gb = 0.0
-            ram_gb = 0.0
-            for dev in (status.get("device_status") or []):
-                d = dev.get("device", "")
-                gb = float(dev.get("memory_gb") or 0)
-                if d.startswith("cuda"):
-                    gpu_gb += gb
-                else:
-                    ram_gb += gb
-            loaded_model = {
-                "name": loaded,
-                "memory_gpu_gb": round(gpu_gb, 3),
-                "memory_ram_gb": round(ram_gb, 3),
-            }
-        except Exception:
-            loaded_model = {"name": loaded, "memory_gpu_gb": None, "memory_ram_gb": None}
-    variables = []
-    for name, data in SAVED_DATA_VARS.items():
-        mem_mb = _estimate_data_var_memory_mb(data)
-        variables.append({
-            "name": name,
-            "task_name": data.get("task_name"),
-            "created_at": data.get("created_at"),
-            "memory_ram_mb": mem_mb,
-            "type": "data",
-        })
-    return jsonify({"loaded_model": loaded_model, "variables": variables})
+    """List loaded model (with GPU/RAM) and saved working‑memory variables."""
+    loaded = cache_store.get_session().get("loaded_model")
+    payload = summarize_for_panel(loaded_model_key=loaded)
+    return jsonify(payload)
 
 
 @app.delete("/api/data-vars/<path:var_name>")
 def api_delete_data_var(var_name: str):
-    """Remove a saved data variable by name (URL-decoded)."""
-    if var_name not in SAVED_DATA_VARS:
+    """Remove a working‑memory variable by name (URL‑decoded)."""
+    if not wm_delete_variable(var_name):
         return jsonify({"error": "Variable not found"}), 404
-    del SAVED_DATA_VARS[var_name]
     return jsonify({"status": "ok"})
 
 
 @app.post("/api/data-vars/save")
 def api_save_data_var():
-    """Save current pipeline state to global variable. Body: { pipeline_id, additional_naming? }. Variable name uses pipeline name; if additional_naming given, appends /additional_naming."""
+    """
+    Save current pipeline state to global working memory.
+
+    Requires: Load → Apply Processing → Save. Only processed data is saved.
+    Body: { pipeline_id, additional_naming? }.
+    Variable name uses dataset path / split / random_n / seed / task name;
+    if additional_naming is given, it is appended at the end.
+    """
     data = request.get_json(force=True) or {}
     pipeline_id = (data.get("pipeline_id") or "").strip()
     additional_naming = (data.get("additional_naming") or "").strip() or None
@@ -937,29 +1132,61 @@ def api_save_data_var():
     pipeline = get_pipeline_by_id(pipeline_id)
     if not pipeline:
         return jsonify({"error": "Pipeline not found"}), 404
-    path = (pipeline.get("hf_dataset_path") or "").strip()
-    if not path:
-        return jsonify({"error": "Load a dataset first"}), 400
-    task_name = (pipeline.get("name") or "").strip() or "-"
-    opts = pipeline.get("hf_load_options") or {}
-    split = opts.get("split")
-    random_n = opts.get("random_n")
-    seed = opts.get("seed")
-    var_name = _saved_var_name(path, split, random_n, seed, task_name, additional_naming)
-    from datetime import datetime
-    SAVED_DATA_VARS[var_name] = {
-        "variable_name": var_name,
-        "pipeline_id": pipeline_id,
-        "task_name": task_name,
-        "data_name": path,
-        "split": split,
-        "random_n": random_n,
-        "seed": seed,
-        "dataset_info": pipeline.get("dataset_info"),
-        "processed_dataset_info": pipeline.get("processed_dataset_info"),
-        "hf_load_options": opts,
-        "created_at": datetime.now().isoformat(),
-    }
+    if pipeline.get("status") != "processed":
+        return jsonify({
+            "error": "Apply Processing first before Save To Variable. Load → Apply Processing → Save.",
+        }), 400
+    try:
+        var_name = save_pipeline_variable(
+            pipeline_id=pipeline_id,
+            pipeline=pipeline,
+            additional_naming=additional_naming,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"status": "ok", "variable_name": var_name})
+
+
+@app.get("/api/residual-vars/<path:var_name>")
+def api_get_residual_var(var_name: str):
+    """Get residual variable by name (directions dict)."""
+    rv = get_residual_variable(var_name)
+    if not rv:
+        return jsonify({"error": "Variable not found"}), 404
+    return jsonify(rv)
+
+
+@app.post("/api/residual-vars/save")
+def api_save_residual_var():
+    """
+    Save residual direction vectors to variable.
+    Body: { directions, task_name, model, num_keys, model_dim, additional_naming? }.
+    """
+    data = request.get_json(force=True) or {}
+    directions = data.get("directions")
+    if not directions or not isinstance(directions, dict):
+        return jsonify({"error": "directions (dict) required"}), 400
+    task_name = (data.get("task_name") or "").strip() or "Residual"
+    model = (data.get("model") or "").strip() or "-"
+    num_keys = data.get("num_keys")
+    model_dim = data.get("model_dim")
+    if num_keys is None:
+        num_keys = len(directions)
+    if model_dim is None and directions:
+        first = next(iter(directions.values()), [])
+        model_dim = len(first) if isinstance(first, (list, tuple)) else 0
+    additional_naming = (data.get("additional_naming") or "").strip() or None
+    try:
+        var_name = save_residual_variable(
+            directions=directions,
+            task_name=task_name,
+            model=model,
+            num_keys=int(num_keys),
+            model_dim=int(model_dim or 0),
+            additional_naming=additional_naming,
+        )
+    except (ValueError, TypeError) as exc:
+        return jsonify({"error": str(exc)}), 400
     return jsonify({"status": "ok", "variable_name": var_name})
 
 

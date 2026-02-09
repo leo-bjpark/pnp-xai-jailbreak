@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ task.title }} - PnP-XAI-LLM</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem('pnp-xai-theme')||'light';</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/xai_0/xai_0.css') }}" />
+</head>
+<body>
+  {% set export_as_link = true %}
+  {% include 'header.html' with context %}
+
+  <div class="main-layout">
+    {% set is_index = false %}
+    {% include 'sidebar.html' with context %}
+
+    <main class="content-area">
+      <div class="content-toolbar">
+        <button type="button" class="btn-run" id="btn-run">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          RUN
+        </button>
+        <span id="generation-status" class="generation-status" aria-live="polite"></span>
+        <button type="button" class="input-setting-trigger" id="input-setting-trigger" title="Task, Model, Treatment, Name" data-task-type="Conversation" data-task-name="{{ task.name or task.title or '' }}" data-task-model="{{ task.model or '' }}" data-task-treatment="{{ task.treatment or '' }}">
+          Conversation | {{ task.model or '—' }} | {{ task.treatment or 'None' }} | {{ task.name or task.title or '—' }}
+        </button>
+      </div>
+
+      <div class="input-setting-panel" id="input-setting-panel">
+        <div class="input-setting-body" id="input-setting-body">
+          <p class="input-setting-hint">Conversation: Enter your message and press RUN to send. Generation continues using cache.</p>
+          <div class="input-setting-form input-setting-form-row">
+            <div class="input-setting-cell">
+              <label for="input-completion-temperature">Temperature</label>
+              <input type="number" id="input-completion-temperature" name="temperature" data-task-input="temperature" class="input-setting-field" min="0" max="2" step="0.1" value="{{ (task.result or {}).get('temperature', 0.7) }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-completion-max-new-tokens">Max new tokens</label>
+              <input type="number" id="input-completion-max-new-tokens" name="max_new_tokens" data-task-input="max_new_tokens" class="input-setting-field" min="1" max="4096" step="1" value="{{ (task.result or {}).get('max_new_tokens', 256) }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-completion-top-p">Top-P</label>
+              <input type="number" id="input-completion-top-p" name="top_p" data-task-input="top_p" class="input-setting-field" min="0" max="1" step="0.05" value="{{ (task.result or {}).get('top_p', 1.0) }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-completion-top-k">Top-K</label>
+              <input type="number" id="input-completion-top-k" name="top_k" data-task-input="top_k" class="input-setting-field" min="0" max="1000" step="1" value="{{ (task.result or {}).get('top_k', 50) }}" />
+            </div>
+            <div class="input-setting-cell input-setting-cell-system">
+              <label for="input-system-instruction">System Instruction</label>
+              <textarea id="input-system-instruction" name="system_instruction" data-task-input="system_instruction" class="input-setting-field input-setting-textarea" rows="1" placeholder="e.g. You are a helpful assistant. Answer briefly.">{{ (task.result or {}).get('system_instruction', 'You are a helpful assistant.') }}</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="results-area results-area-conversation">
+        <div class="conversation-wrap" id="conversation-wrap" data-cumulative-generated="{{ (task.result or {}).get('cumulative_generated_tokens', 0) }}">
+          <div class="conversation-log" id="conversation-log" aria-live="polite"></div>
+          <div class="conversation-input-row" id="conversation-input-row">
+            <div class="input-wrap">
+              <textarea id="conversation-user-input" placeholder="Enter message, then RUN..." rows="3"></textarea>
+            </div>
+          </div>
+          <details class="results-completion-meta conversation-result-meta" id="conversation-result-meta">
+            <summary>Parameters &amp; full result</summary>
+            <pre class="results-json" id="conversation-result-json">{% if task.result %}{{ task.result | tojson(indent=2) }}{% endif %}</pre>
+          </details>
+        </div>
+        <aside class="conversation-side-panel" id="conversation-side-panel">
+          <div class="conversation-side-card">
+            <h4 class="conversation-side-title">Cache</h4>
+            <div class="conversation-side-stat" id="conversation-cache-count">
+              <span class="conversation-side-stat-value" id="conversation-cache-count-value">{{ (task.result or {}).get('cache_message_count', 0) }}</span>
+              <span class="conversation-side-stat-label">messages in cache</span>
+            </div>
+            <div class="conversation-side-tokens-wrap" id="conversation-token-count-wrap">
+              <div class="conversation-side-stat">
+                <span class="conversation-side-stat-value" id="conversation-token-input-value">—</span>
+                <span class="conversation-side-stat-label">This turn: input tokens</span>
+              </div>
+              <div class="conversation-side-stat">
+                <span class="conversation-side-stat-value" id="conversation-token-generated-value">—</span>
+                <span class="conversation-side-stat-label">This turn: generated tokens</span>
+              </div>
+              <div class="conversation-side-stat">
+                <span class="conversation-side-stat-value" id="conversation-token-cumulative-value">—</span>
+                <span class="conversation-side-stat-label">Cumulative generated</span>
+              </div>
+            </div>
+            <button type="button" class="btn-clear-cache btn-clear-cache-side" id="btn-clear-cache" title="Clear conversation cache">Clear cache</button>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-confirm-load">
+    <div class="modal-dialog">
+      <h3>Confirm Model Load</h3>
+      <p id="modal-message">Loaded Model + Treatment does not match the current session. Load the model with this setting?</p>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-cancel" id="modal-cancel">Cancel</button>
+        <button type="button" class="modal-btn-confirm" id="modal-confirm">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/working_memory.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/memory_panels.js') }}"></script>
+  <script>window.PNP_CURRENT_TASK_ID = {{ task.id | tojson }}; window.PNP_CURRENT_TASK_LEVEL = {{ task.xai_level | tojson }};</script>
+  <script>window.PNP_RESTORE_CONVERSATION = {% if task.result and task.result.get('conversation_list') %}{{ task.result.conversation_list | tojson | safe }}{% else %}null{% endif %};</script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script>
+  (function() {
+    var log = document.getElementById("conversation-log");
+    var userInput = document.getElementById("conversation-user-input");
+    window.PNP_conversationMessages = [];
+
+    function escapeHtml(s) {
+      if (s == null) return "";
+      var div = document.createElement("div");
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    window.PNP_appendConversationMessage = function(role, content, skipPush) {
+      if (!log) return;
+      var msg = document.createElement("div");
+      msg.className = "conversation-msg " + role;
+      msg.innerHTML = "<span class=\"conversation-role\">" + (role === "user" ? "User" : "Assistant") + "</span>" +
+        "<div class=\"conversation-bubble\">" + escapeHtml(content) + "</div>";
+      log.appendChild(msg);
+      log.scrollTop = log.scrollHeight;
+      if (!skipPush && role === "user") window.PNP_conversationMessages.push({ role: "user", content: content || "" });
+    };
+
+    window.PNP_getConversationMessagesForRun = function(newUserContent) {
+      var arr = window.PNP_conversationMessages ? window.PNP_conversationMessages.slice() : [];
+      arr.push({ role: "user", content: newUserContent || "" });
+      return arr;
+    };
+
+    window.PNP_appendAssistantMessage = function(content) {
+      window.PNP_conversationMessages = window.PNP_conversationMessages || [];
+      window.PNP_conversationMessages.push({ role: "assistant", content: content || "" });
+    };
+
+    window.PNP_appendConversationMessageGenerating = function() {
+      if (!log) return;
+      var msg = document.createElement("div");
+      msg.className = "conversation-msg assistant";
+      msg.setAttribute("data-generating", "true");
+      msg.innerHTML = "<span class=\"conversation-role\">Assistant</span>" +
+        "<div class=\"conversation-bubble conversation-generating\"><span class=\"conversation-generating-text\">Generating</span><span class=\"conversation-generating-dots\"><span>.</span><span>.</span><span>.</span></span></div>";
+      log.appendChild(msg);
+      log.scrollTop = log.scrollHeight;
+    };
+
+    window.PNP_finishGeneratingMessage = function(content, isError) {
+      if (!log) return;
+      var generatingMsg = log.querySelector(".conversation-msg[data-generating=\"true\"]");
+      if (!generatingMsg) return;
+      generatingMsg.removeAttribute("data-generating");
+      var bubble = generatingMsg.querySelector(".conversation-bubble");
+      if (bubble) {
+        bubble.classList.remove("conversation-generating");
+        bubble.textContent = content != null ? content : "";
+        if (isError) bubble.classList.add("conversation-error");
+      }
+      log.scrollTop = log.scrollHeight;
+    };
+
+    window.PNP_updateConversationTokenCount = function(inputTokens, generatedTokens, cumulativeGenerated) {
+      var wrap = document.getElementById("conversation-token-count-wrap");
+      var inputEl = document.getElementById("conversation-token-input-value");
+      var generatedEl = document.getElementById("conversation-token-generated-value");
+      var cumulativeEl = document.getElementById("conversation-token-cumulative-value");
+      if (wrap) wrap.classList.add("visible");
+      if (inputEl) inputEl.textContent = inputTokens != null ? inputTokens : "—";
+      if (generatedEl) generatedEl.textContent = generatedTokens != null ? generatedTokens : "—";
+      if (cumulativeEl) cumulativeEl.textContent = cumulativeGenerated != null && cumulativeGenerated >= 0 ? cumulativeGenerated : "—";
+    };
+
+    window.PNP_updateConversationCacheCount = function(count) {
+      var el = document.getElementById("conversation-cache-count-value");
+      if (el) el.textContent = count != null ? count : 0;
+    };
+
+    window.PNP_getConversationUserInput = function() {
+      return (userInput && userInput.value) ? userInput.value.trim() : "";
+    };
+
+    window.PNP_clearConversationUserInput = function() {
+      if (userInput) userInput.value = "";
+    };
+
+    document.getElementById("btn-clear-cache").addEventListener("click", function() {
+      var taskId = window.PNP_CURRENT_TASK_ID;
+      var trigger = document.getElementById("input-setting-trigger");
+      var model = (trigger && trigger.dataset.taskModel) || "";
+      var treatment = (trigger && trigger.dataset.taskTreatment) || "";
+      var name = (trigger && trigger.dataset.taskName) || "";
+      if (taskId) {
+        var key = taskId + "|" + model + "|" + treatment + "|" + name;
+        fetch("/api/memory/session/unregister/" + encodeURIComponent(key), { method: "DELETE" })
+          .then(function() { if (typeof window.refreshMemorySummary === "function") window.refreshMemorySummary(); })
+          .catch(function() {});
+      }
+      window.PNP_conversationMessages = [];
+      if (window.PNP_updateConversationCacheCount) window.PNP_updateConversationCacheCount(0);
+      if (window.PNP_updateConversationTokenCount) window.PNP_updateConversationTokenCount(null, null, 0);
+      var wrapEl = document.getElementById("conversation-token-count-wrap");
+      if (wrapEl) wrapEl.classList.remove("visible");
+      var wrap = document.getElementById("conversation-wrap");
+      if (wrap) wrap.dataset.cumulativeGenerated = "0";
+      if (log) log.innerHTML = "";
+    });
+
+    var wrap = document.getElementById("conversation-wrap");
+    var cum = wrap && wrap.dataset.cumulativeGenerated ? parseInt(wrap.dataset.cumulativeGenerated, 10) : 0;
+
+    if (window.PNP_RESTORE_CONVERSATION && window.PNP_RESTORE_CONVERSATION.messages && Array.isArray(window.PNP_RESTORE_CONVERSATION.messages)) {
+      var list = window.PNP_RESTORE_CONVERSATION.messages;
+      window.PNP_conversationMessages = list.map(function(m) {
+        return { role: (m.role === "ai" || m.role === "assistant") ? "assistant" : "user", content: m.content || "" };
+      });
+      for (var i = 0; i < list.length; i++) {
+        var m = list[i];
+        var role = (m.role === "ai" || m.role === "assistant") ? "assistant" : "user";
+        window.PNP_appendConversationMessage(role, m.content || "", true);
+      }
+    }
+
+    if (window.PNP_updateConversationTokenCount && cum > 0) {
+      var w = document.getElementById("conversation-token-count-wrap");
+      if (w) { w.classList.add("visible"); window.PNP_updateConversationTokenCount(null, null, cum); }
+    }
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ task.title }} - PnP-XAI-LLM</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem('pnp-xai-theme')||'light';</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/xai_2/xai_2.css') }}" />
+  <style>
+    .layer-sim-toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    .layer-sim-toolbar select { min-width: 240px; padding: 6px 10px; font-size: 12px; }
+    .layer-sim-toolbar .btn-analyze { padding: 6px 14px; background: var(--accent); color: var(--accent-fg, #fff); border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+    .layer-sim-toolbar .btn-analyze:hover:not(:disabled) { opacity: 0.9; }
+    .layer-sim-toolbar .btn-analyze:disabled { opacity: 0.6; cursor: not-allowed; }
+    .layer-sim-layout { display: grid; grid-template-columns: 1fr; gap: 28px; max-width: 100%; }
+    .layer-sim-main-section { grid-column: 1; }
+    .layer-sim-permod-section { grid-column: 1; }
+    .layer-sim-heatmap-section { margin-bottom: 0; }
+    .layer-sim-heatmap-section h4 { margin-bottom: 10px; font-size: 13px; font-weight: 600; }
+    .layer-sim-heatmap-wrap { display: inline-block; position: relative; }
+    .layer-sim-heatmap { display: grid; border: 1px solid var(--border); }
+    .layer-sim-heatmap .cell { min-width: 8px; min-height: 8px; transition: outline 0.1s; }
+    .layer-sim-heatmap .cell:hover { outline: 2px solid var(--accent); outline-offset: -1px; z-index: 1; }
+    .layer-sim-heatmap .cell.serial-boundary-r { border-right: 2px solid var(--text); }
+    .layer-sim-heatmap .cell.serial-boundary-b { border-bottom: 2px solid var(--text); }
+    .layer-sim-heatmap .cell.serial-boundary-l { border-left: 2px solid var(--text); }
+    .layer-sim-heatmap .cell.serial-boundary-t { border-top: 2px solid var(--text); }
+    .layer-sim-heatmap-axis { display: flex; flex-direction: column; gap: 0; }
+    .layer-sim-heatmap-top { display: flex; align-items: flex-end; }
+    .layer-sim-heatmap-top-spacer { min-width: 28px; flex-shrink: 0; }
+    .layer-sim-heatmap-top-labels { display: flex; font-size: 10px; color: var(--muted); }
+    .layer-sim-heatmap-top-labels span { display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+    .layer-sim-heatmap-side { display: flex; }
+    .layer-sim-heatmap-left-labels { display: flex; flex-direction: column; font-size: 10px; color: var(--muted); padding-right: 4px; justify-content: flex-start; }
+    .layer-sim-heatmap-left-labels span { text-align: right; }
+    .layer-sim-tooltip { position: fixed; z-index: 9999; background: var(--sidebar); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 12px; pointer-events: none; border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; }
+    .layer-sim-tooltip.visible { display: block; }
+    .layer-sim-subgrid { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 20px; }
+    .layer-sim-subgrid .heatmap-box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .layer-sim-subgrid .heatmap-box h5 { margin: 0 0 8px 0; font-size: 12px; font-weight: 600; }
+    @media (min-width: 1200px) { .layer-sim-subgrid { grid-template-columns: repeat(4, 1fr); } }
+    @media (max-width: 700px) { .layer-sim-subgrid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  {% set header_title = 'PnP-XAI-LLM — ' ~ task.title %}
+  {% set export_as_link = true %}
+  {% include 'header.html' with context %}
+
+  <div class="main-layout">
+    {% set is_index = false %}
+    {% include 'sidebar.html' with context %}
+
+    <main class="content-area">
+      <div class="content-toolbar">
+        <button type="button" class="input-setting-trigger" id="input-setting-trigger" title="Task" data-task-type="Layer Direction Similarity Analysis" data-task-name="{{ task.name or task.title or '' }}" data-task-model="" data-task-treatment="">
+          Layer Direction Similarity Analysis | {{ task.name or task.title or '—' }}
+        </button>
+      </div>
+
+      <div class="results-area">
+        <div class="results-content visible" id="results-content" style="padding: 20px; max-width: 100%;">
+          <div class="layer-sim-toolbar">
+            <select id="layer-sim-var-select">
+              <option value="">— Select residual variable —</option>
+            </select>
+            <button type="button" class="btn-analyze" id="layer-sim-btn-analyze">Load &amp; Analyze</button>
+            <span id="layer-sim-status" class="generation-status" style="font-size: 12px;"></span>
+          </div>
+          <div id="layer-sim-heatmaps"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="layer-sim-tooltip" id="layer-sim-tooltip"></div>
+
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/working_memory.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/memory_panels.js') }}"></script>
+  <script>window.PNP_CURRENT_TASK_ID = {{ task.id | tojson }}; window.PNP_CURRENT_TASK_LEVEL = {{ task.xai_level | tojson }};</script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script>
+  (function() {
+    var MODULE_ORDER = ['attn_out', 'attn_block_out', 'mlp_out', 'mlp_block_out'];
+    var MODULE_DISPLAY_NAMES = { attn_out: 'attn_out', attn_block_out: 'attn_block_out', mlp_out: 'mlp_out', mlp_block_out: 'mlp_block_out' };
+
+    function parseModuleKey(key) {
+      var m = key.match(/layers\.(\d+)/);
+      var layer = m ? parseInt(m[1], 10) : -1;
+      var type = 'attn_out';
+      if (/\.attn_out$/.test(key)) type = 'attn_out';
+      else if (/\.attn_block_out$/.test(key)) type = 'attn_block_out';
+      else if (/\.mlp_out$/.test(key)) type = 'mlp_out';
+      else if (/\.mlp_block_out$/.test(key)) type = 'mlp_block_out';
+      else if (/\.o_proj$/.test(key)) type = 'attn_out';
+      else if (/\.down_proj$/.test(key)) type = 'mlp_out';
+      else if (/\.mlp$/.test(key) || (/\.mlp\./.test(key) && !/\.down_proj|\.mlp_out/.test(key))) type = 'mlp_block_out';
+      else if (/self_attn$/.test(key) || (/\.self_attn\./.test(key) && !/\.o_proj/.test(key))) type = 'attn_block_out';
+      return { layer: layer, type: type };
+    }
+
+    function dot(a, b) {
+      var s = 0;
+      for (var i = 0; i < a.length; i++) s += a[i] * b[i];
+      return s;
+    }
+    function norm(a) {
+      var s = 0;
+      for (var i = 0; i < a.length; i++) s += a[i] * a[i];
+      return Math.sqrt(s) || 1e-12;
+    }
+    function cosine(a, b) {
+      var n = norm(a) * norm(b);
+      return n ? dot(a, b) / n : 0;
+    }
+
+    function buildSerialOrder(directions) {
+      var items = [];
+      for (var k in directions) {
+        var p = parseModuleKey(k);
+        if (p.layer >= 0 && MODULE_ORDER.indexOf(p.type) >= 0)
+          items.push({ key: k, layer: p.layer, type: p.type });
+      }
+      items.sort(function(a, b) {
+        if (a.layer !== b.layer) return a.layer - b.layer;
+        return MODULE_ORDER.indexOf(a.type) - MODULE_ORDER.indexOf(b.type);
+      });
+      return items;
+    }
+
+    function buildByModule(directions) {
+      var byMod = { attn_out: [], attn_block_out: [], mlp_out: [], mlp_block_out: [] };
+      for (var k in directions) {
+        var p = parseModuleKey(k);
+        if (p.layer >= 0 && byMod[p.type])
+          byMod[p.type].push({ key: k, layer: p.layer });
+      }
+      for (var t in byMod)
+        byMod[t].sort(function(a, b) { return a.layer - b.layer; });
+      return byMod;
+    }
+
+    function renderHeatmap(container, labels, matrix, cellSize, opts) {
+      opts = opts || {};
+      var labelKey = opts.labelKey !== false;
+      var serialSeparate4 = !!opts.serialSeparate4;
+      var showAxis = opts.showAxis !== false;
+      var n = matrix.length;
+      if (!n) return;
+      var tooltip = document.getElementById('layer-sim-tooltip');
+      var grid = document.createElement('div');
+      grid.className = 'layer-sim-heatmap';
+      grid.style.gridTemplateColumns = 'repeat(' + n + ', ' + cellSize + 'px)';
+      grid.style.gridTemplateRows = 'repeat(' + n + ', ' + cellSize + 'px)';
+      for (var i = 0; i < n; i++) {
+        for (var j = 0; j < n; j++) {
+          var v = matrix[i][j];
+          var c = document.createElement('div');
+          c.className = 'cell';
+          if (serialSeparate4) {
+            var modsPerLayer = MODULE_ORDER.length;
+            if (j % modsPerLayer === 0 && j > 0) c.classList.add('serial-boundary-l');
+            if (i % modsPerLayer === 0 && i > 0) c.classList.add('serial-boundary-t');
+          }
+          var t = Math.max(0, Math.min(1, (v + 1) / 2));
+          var r = Math.round(255 * (1 - t));
+          var g = Math.round(255 * t);
+          var b = 100;
+          c.style.backgroundColor = 'rgb(' + r + ',' + g + ',' + b + ')';
+          c.dataset.i = i;
+          c.dataset.j = j;
+          c.dataset.val = v.toFixed(4);
+          c.dataset.labelI = labelKey ? labels[i] : String(i);
+          c.dataset.labelJ = labelKey ? labels[j] : String(j);
+          c.addEventListener('mouseenter', function(ev) {
+            var el = ev.target;
+            tooltip.textContent = el.dataset.labelI + ' vs ' + el.dataset.labelJ + ': ' + el.dataset.val;
+            tooltip.classList.add('visible');
+          });
+          c.addEventListener('mousemove', function(ev) {
+            tooltip.style.left = (ev.clientX + 12) + 'px';
+            tooltip.style.top = (ev.clientY + 12) + 'px';
+          });
+          c.addEventListener('mouseleave', function() { tooltip.classList.remove('visible'); });
+          grid.appendChild(c);
+        }
+      }
+      if (showAxis) {
+        var axisWrap = document.createElement('div');
+        axisWrap.className = 'layer-sim-heatmap-axis';
+        var topWrap = document.createElement('div');
+        topWrap.className = 'layer-sim-heatmap-top';
+        var topSpacer = document.createElement('div');
+        topSpacer.className = 'layer-sim-heatmap-top-spacer';
+        topWrap.appendChild(topSpacer);
+        var topLabels = document.createElement('div');
+        topLabels.className = 'layer-sim-heatmap-top-labels';
+        topLabels.style.height = cellSize + 'px';
+        var modsPerLayer = MODULE_ORDER.length;
+        if (serialSeparate4 && n >= modsPerLayer) {
+          var numLayers = Math.floor(n / modsPerLayer);
+          for (var ly = 0; ly < numLayers; ly++) {
+            var ts = document.createElement('span');
+            ts.style.width = (modsPerLayer * cellSize) + 'px';
+            ts.style.height = cellSize + 'px';
+            ts.textContent = 'L' + ly;
+            topLabels.appendChild(ts);
+          }
+          if (n % modsPerLayer) {
+            var rem = document.createElement('span');
+            rem.style.width = ((n % modsPerLayer) * cellSize) + 'px';
+            rem.textContent = 'L' + numLayers;
+            topLabels.appendChild(rem);
+          }
+        } else {
+          for (var j = 0; j < n; j++) {
+            var ts = document.createElement('span');
+            ts.style.width = cellSize + 'px';
+            ts.style.height = cellSize + 'px';
+            ts.textContent = labels[j];
+            topLabels.appendChild(ts);
+          }
+        }
+        topWrap.appendChild(topLabels);
+        axisWrap.appendChild(topWrap);
+        var sideWrap = document.createElement('div');
+        sideWrap.className = 'layer-sim-heatmap-side';
+        var leftLabels = document.createElement('div');
+        leftLabels.className = 'layer-sim-heatmap-left-labels';
+        leftLabels.style.minHeight = (n * cellSize) + 'px';
+        if (serialSeparate4 && n >= modsPerLayer) {
+          var numLayers = Math.floor(n / modsPerLayer);
+          for (var ly = 0; ly < numLayers; ly++) {
+            var ls = document.createElement('span');
+            ls.style.height = (modsPerLayer * cellSize) + 'px';
+            ls.textContent = 'L' + ly;
+            leftLabels.appendChild(ls);
+          }
+          if (n % modsPerLayer) {
+            var lrem = document.createElement('span');
+            lrem.style.height = ((n % modsPerLayer) * cellSize) + 'px';
+            lrem.textContent = 'L' + numLayers;
+            leftLabels.appendChild(lrem);
+          }
+        } else {
+          for (var i = 0; i < n; i++) {
+            var ls = document.createElement('span');
+            ls.style.height = cellSize + 'px';
+            ls.textContent = labels[i];
+            leftLabels.appendChild(ls);
+          }
+        }
+        sideWrap.appendChild(leftLabels);
+        sideWrap.appendChild(grid);
+        axisWrap.appendChild(sideWrap);
+        container.appendChild(axisWrap);
+      } else {
+        container.appendChild(grid);
+      }
+    }
+
+    function runAnalysis() {
+      var sel = document.getElementById('layer-sim-var-select');
+      var btn = document.getElementById('layer-sim-btn-analyze');
+      var status = document.getElementById('layer-sim-status');
+      var out = document.getElementById('layer-sim-heatmaps');
+      var varName = (sel && sel.value) || '';
+      if (!varName) {
+        status.textContent = 'Select a residual variable first.';
+        return;
+      }
+      btn.disabled = true;
+      status.textContent = 'Loading...';
+      out.innerHTML = '';
+      fetch('/api/residual-vars/' + encodeURIComponent(varName))
+        .then(function(r) {
+          if (!r.ok) throw new Error('Variable not found');
+          return r.json();
+        })
+        .then(function(data) {
+          var directions = data.directions || {};
+          if (!Object.keys(directions).length) throw new Error('No directions in variable');
+          status.textContent = 'Computing...';
+
+          var serial = buildSerialOrder(directions);
+          var n = serial.length;
+          var mainMatrix = [];
+          var mainLabels = [];
+          for (var i = 0; i < n; i++) {
+            mainLabels.push('L' + serial[i].layer + '_' + serial[i].type);
+            var row = [];
+            var vi = directions[serial[i].key];
+            for (var j = 0; j < n; j++) {
+              var vj = directions[serial[j].key];
+              row.push(cosine(vi, vj));
+            }
+            mainMatrix.push(row);
+          }
+
+          var cellSize = Math.max(6, Math.min(14, Math.floor(400 / n)));
+          var mainWrap = document.createElement('div');
+          mainWrap.className = 'layer-sim-heatmap-section';
+          var mainTitle = document.createElement('h4');
+          mainTitle.textContent = 'Serial: attn_out | attn_block_out | mlp_out | mlp_block_out — Cosine Similarity';
+          mainWrap.appendChild(mainTitle);
+          var mainGridWrap = document.createElement('div');
+          mainGridWrap.className = 'layer-sim-heatmap-wrap';
+          renderHeatmap(mainGridWrap, mainLabels, mainMatrix, cellSize, { serialSeparate4: true, showAxis: true });
+          mainWrap.appendChild(mainGridWrap);
+          mainWrap.className = 'layer-sim-main-section layer-sim-heatmap-section';
+
+          var byMod = buildByModule(directions);
+          var subWrap = document.createElement('div');
+          subWrap.className = 'layer-sim-permod-section layer-sim-heatmap-section';
+          var subTitle = document.createElement('h4');
+          subTitle.textContent = 'Per-module: Layer × Layer Cosine Similarity';
+          subWrap.appendChild(subTitle);
+          var subGrid = document.createElement('div');
+          subGrid.className = 'layer-sim-subgrid';
+          MODULE_ORDER.forEach(function(mod) {
+            var arr = byMod[mod];
+            if (!arr || !arr.length) return;
+            var M = [];
+            var L = [];
+            for (var i = 0; i < arr.length; i++) {
+              L.push('L' + arr[i].layer);
+              var row = [];
+              var vi = directions[arr[i].key];
+              for (var j = 0; j < arr.length; j++) {
+                var vj = directions[arr[j].key];
+                row.push(cosine(vi, vj));
+              }
+              M.push(row);
+            }
+            var sz = Math.max(6, Math.min(14, Math.floor(320 / L.length)));
+            var box = document.createElement('div');
+            box.className = 'heatmap-box';
+            var h = document.createElement('h5');
+            h.textContent = MODULE_DISPLAY_NAMES[mod] || mod;
+            box.appendChild(h);
+            var gw = document.createElement('div');
+            gw.className = 'layer-sim-heatmap-wrap';
+            renderHeatmap(gw, L, M, sz, { showAxis: true });
+            box.appendChild(gw);
+            subGrid.appendChild(box);
+          });
+          subWrap.appendChild(subGrid);
+          var layout = document.createElement('div');
+          layout.className = 'layer-sim-layout';
+          layout.appendChild(mainWrap);
+          layout.appendChild(subWrap);
+          out.appendChild(layout);
+
+          status.textContent = 'Done. Hover over cells for values.';
+        })
+        .catch(function(err) {
+          status.textContent = 'Error: ' + (err.message || 'Unknown');
+        })
+        .then(function() {
+          btn.disabled = false;
+        });
+    }
+
+    function loadResidualOptions() {
+      var sel = document.getElementById('layer-sim-var-select');
+      if (!sel) return;
+      fetch('/api/data-vars').then(function(r) { return r.json(); }).then(function(data) {
+        var vars = (data.variables || []).filter(function(v) { return v.type === 'residual'; });
+        sel.innerHTML = '<option value="">— Select residual variable —</option>';
+        vars.forEach(function(v) {
+          var opt = document.createElement('option');
+          opt.value = v.name || '';
+          opt.textContent = (v.name || '') + (v.task_name ? ' (' + v.task_name + ')' : '');
+          sel.appendChild(opt);
+        });
+      }).catch(function() {});
+    }
+
+    loadResidualOptions();
+    document.getElementById('layer-sim-btn-analyze').addEventListener('click', runAnalysis);
+    if (typeof window.refreshSidebarVariableList === 'function') {
+      var orig = window.refreshSidebarVariableList;
+      window.refreshSidebarVariableList = function() { orig(); loadResidualOptions(); };
+    }
+  })();
+  </script>
+</body>
+</html>

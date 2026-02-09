@@ -103,6 +103,8 @@
     window.PNP_PROCESSING_CODE = {{ (pipeline.processing_code or '') | tojson }};
     window.PNP_PROCESSED_DATASET_INFO = {{ (pipeline.processed_dataset_info or {}) | tojson }};
   </script>
+  <script src="{{ url_for('static', filename='js/working_memory.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/memory_panels.js') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
   <script src="{{ url_for('static', filename='js/data_pipeline.js') }}"></script>
 </body>

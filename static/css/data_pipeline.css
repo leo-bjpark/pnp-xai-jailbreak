@@ -201,7 +201,7 @@
 
 .data-pipeline-textarea {
   width: 100%;
-  max-width: 560px;
+  max-width: 1000px;
   padding: 8px 12px;
   font-size: 12px;
   font-family: ui-monospace, monospace;

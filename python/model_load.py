@@ -65,14 +65,16 @@ except ImportError:
             tokenizer = AutoTokenizer.from_pretrained(base_model_name)
             tokenizer.padding_side = "left"
             tokenizer.pad_token = tokenizer.eos_token
-            model = AutoModelForCausalLM.from_pretrained(
-                base_model_name,
-                torch_dtype=torch.bfloat16,
-                device_map="auto",
-                output_attentions=True,
-            )
-            model.eval()
+            model = None
             try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    base_model_name,
+                    torch_dtype=torch.bfloat16,
+                    device_map="auto",
+                    output_attentions=True,
+                    low_cpu_mem_usage=True,
+                )
+                model.eval()
                 with torch.inference_mode():
                     enc = tokenizer("hello", return_tensors="pt")
                     device = next(model.parameters()).device
@@ -82,15 +84,17 @@ except ImportError:
                 if not out.attentions or any(a is None for a in out.attentions):
                     raise RuntimeError("attentions None")
             except Exception as e:
-                print(f"Warning: Falling back to CPU load due to: {e}")
+                err_msg = str(e).lower()
+                if "meta" in err_msg or "cannot copy" in err_msg or model is None:
+                    print(f"Warning: Falling back to CPU load (device_map=cpu) due to: {e}")
                 model = AutoModelForCausalLM.from_pretrained(
                     base_model_name,
                     torch_dtype=torch.bfloat16,
-                    device_map=None,
+                    device_map="cpu",
                     output_attentions=True,
+                    low_cpu_mem_usage=False,
                 )
                 model.eval()
-                model = model.to(torch.device("cpu"))
             return model, tokenizer
 
         @lru_cache(maxsize=2)

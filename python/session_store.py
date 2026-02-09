@@ -152,3 +152,15 @@ def import_memory(data: Dict[str, Any]) -> bool:
         return False
     _save_tasks(tasks)
     return True
+
+
+def clear_all_tasks(xai_level_names: Optional[Dict[str, str]] = None) -> None:
+    """Delete all tasks. Keeps structure from xai_level_names if provided."""
+    if xai_level_names:
+        data = {}
+        for level in sorted(xai_level_names.keys(), key=lambda x: [int(p) for p in str(x).split(".")]):
+            key = _level_to_key(level)
+            data[key] = []
+    else:
+        data = {"xai_level_0": [], "xai_level_1": []}
+    _save_tasks(data)

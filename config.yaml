@@ -33,7 +33,8 @@ XAI_LEVEL_NAMES:
   - "0.2.5": "Positive and Negative Response Preference"
   - "1.0.1": "Response Attribution"
   - "1.0.1": "Positive & Negative Attribution"
-  - "2.0.1": "Internal Mechanism Analysis"
+  - "2.0.1": "Residual Concept Detection"
+  - "2.0.2": "Layer Direction Similarity Analysis"
 
 
 DATASETS:

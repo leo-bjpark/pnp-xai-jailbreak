@@ -1,0 +1,64 @@
+/* XAI Level 2 - Internal Mechanism Analysis */
+.input-layer-names-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.input-layer-names-row .input-setting-field {
+  flex: 1;
+}
+.btn-load-layers {
+  padding: 6px 12px;
+  font-size: 12px;
+  background: var(--sidebar);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-load-layers:hover {
+  background: var(--hover);
+}
+.input-setting-cell-wide {
+  grid-column: 1 / -1;
+}
+.residual-concept-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.input-setting-hint-small {
+  font-size: 11px;
+  color: var(--muted);
+  display: block;
+  margin-top: 4px;
+}
+
+.residual-save-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+.residual-save-row .btn-save-residual-var {
+  padding: 6px 14px;
+  font-size: 12px;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.residual-save-row .btn-save-residual-var:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.residual-save-row .residual-var-additional-input {
+  flex: 1;
+  min-width: 120px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--sidebar);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}

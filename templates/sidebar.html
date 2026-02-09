@@ -135,10 +135,23 @@
       {% for p in (dataset_pipelines or []) %}
       <li class="dataset-pipeline-item {% if pipeline and p.id == pipeline.id %}active{% endif %}" data-pipeline-id="{{ p.id }}">
         <a href="/data/{{ p.id }}" class="dataset-pipeline-link">{{ p.name }} --- {{ p.status }}</a>
+        <button type="button" class="dataset-pipeline-delete" data-pipeline-id="{{ p.id }}" title="Delete">×</button>
       </li>
       {% else %}
       <li class="dataset-pipeline-empty">No pipelines yet.</li>
       {% endfor %}
+    </ul>
+    {% if is_index %}</div>{% endif %}
+  </div>
+
+  <div class="sidebar-section" {% if is_index %}data-section="variable-cache"{% endif %}>
+    <div class="sidebar-section-title">
+      {% if is_index %}<span class="sidebar-section-chevron" aria-hidden="true">▼</span>{% endif %}
+      <span>Variable Cache</span>
+    </div>
+    {% if is_index %}<div class="sidebar-section-body">{% endif %}
+    <ul class="sidebar-variable-list" id="sidebar-variable-list">
+      <li class="sidebar-variable-empty" id="sidebar-variable-empty">No variables.</li>
     </ul>
     {% if is_index %}</div>{% endif %}
   </div>
