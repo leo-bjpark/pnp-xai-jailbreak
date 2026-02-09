@@ -1,5 +1,31 @@
 """
 PnP-XAI-LLM - VSCode-like XAI analysis tool.
+
+Thin Flask entrypoint. All routes are defined in python/web via blueprints.
+"""
+
+import sys
+from pathlib import Path
+
+from flask import Flask
+
+from python.web import create_app
+
+
+# Ensure project root is on path for other modules
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
+app: Flask = create_app()
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
+
+"""
+PnP-XAI-LLM - VSCode-like XAI analysis tool.
 """
 
 import json
@@ -12,44 +38,9 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from queue import Empty, Queue
-from threading import Thread
+from flask import Flask
 
-from flask import Flask, Response, jsonify, redirect, render_template, request, stream_with_context
-
-# Model list and loading via python.model_load (reads config.yaml, uses backup.utils internally)
-from python.model_load import clear_model_cache, get_config_models, get_config_models_grouped, load_model, get_model_status
-
-from python.config_loader import get_xai_level_names, get_xai_level_names_grouped
-from python.session_store import (
-    add_task,
-    get_task_by_id,
-    get_tasks,
-    update_task_title,
-    update_task_result,
-    delete_task,
-    get_raw_memory,
-    import_memory,
-    TASKS_FILE,
-)
-from python.dataset_pipeline_store import (
-    get_pipelines,
-    get_pipeline_by_id,
-    add_pipeline,
-    update_pipeline as update_pipeline_store,
-    delete_pipeline,
-)
-from python.memory import cache_store, task_result_store, variable_store
-from python.memory.variable import (
-    summarize_for_panel,
-    save_pipeline_variable,
-    save_residual_variable,
-    get_residual_variable,
-    delete_variable as wm_delete_variable,
-    clear_all as wm_clear_all,
-)
-
-app = Flask(__name__)
+from python.web import create_app
 
 
 @app.get("/panel")
@@ -551,7 +542,7 @@ def api_run():
     system_instruction = (input_setting.get("system_instruction") or "").strip()
 
     if current_model and messages_input and isinstance(messages_input, list):
-        from python.routes.xai_0 import run_conversation
+        from python.xai_handlers import run_conversation
 
         result, status = run_conversation(
             model=model,
@@ -570,7 +561,7 @@ def api_run():
 
     if "input_string" in input_setting and current_model:
         if attribution_method:
-            from python.routes.xai_1 import run_attribution
+            from python.xai_handlers import run_attribution
 
             result, status = run_attribution(
                 model=model,
@@ -582,7 +573,7 @@ def api_run():
                 input_setting=input_setting,
             )
             return jsonify(result), status
-        from python.routes.xai_0 import run_completion
+        from python.xai_handlers import run_completion
 
         result, status = run_completion(
             model=model,
@@ -595,7 +586,7 @@ def api_run():
 
     # Residual Concept Detection (2.0.1)
     if (input_setting.get("variable_name") or "").strip() and current_model:
-        from python.routes.xai_2 import run_residual_concept
+        from python.xai_handlers import run_residual_concept
 
         result, status = run_residual_concept(
             model=model,
@@ -606,7 +597,7 @@ def api_run():
         return jsonify(result), status
 
     # Fallback: placeholder for other levels (xai_2+)
-    from python.routes.xai_2 import run_placeholder
+    from python.xai_handlers import run_placeholder
 
     result, status = run_placeholder(
         model=model,
@@ -660,7 +651,7 @@ def api_run_residual_concept_stream():
     def run_thread():
         with app.app_context():
             try:
-                from python.routes.xai_2 import run_residual_concept
+                from python.xai_handlers import run_residual_concept
 
                 res, status = run_residual_concept(
                     model=model,
