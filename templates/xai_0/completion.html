@@ -23,12 +23,12 @@
           RUN
         </button>
         <span id="generation-status" class="generation-status" aria-live="polite"></span>
-        <button type="button" class="input-setting-trigger" id="input-setting-trigger" title="Task, Model, Treatment, Name" data-task-type="Completion" data-task-name="{{ task.name or task.title or '' }}" data-task-model="{{ task.model or '' }}" data-task-treatment="{{ task.treatment or '' }}">
+        <button type="button" class="input-setting-trigger has-setting" id="input-setting-trigger" title="Task, Model, Treatment, Name" data-task-type="Completion" data-task-name="{{ task.name or task.title or '' }}" data-task-model="{{ task.model or '' }}" data-task-treatment="{{ task.treatment or '' }}">
           Completion | {{ task.model or '—' }} | {{ task.treatment or 'None' }} | {{ task.name or task.title or '—' }}
         </button>
       </div>
 
-      <div class="input-setting-panel" id="input-setting-panel">
+      <div class="input-setting-panel visible" id="input-setting-panel">
         <div class="input-setting-body" id="input-setting-body">
           <p class="input-setting-hint">Completion: set generation parameters and input prompt. RUN uses the loaded model to generate.</p>
           <div class="input-setting-form input-setting-form-row">

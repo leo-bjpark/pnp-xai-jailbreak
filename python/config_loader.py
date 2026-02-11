@@ -7,32 +7,16 @@ import yaml
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
-_KNOWN_NAME_TO_LEVEL = {
-    "completion": "0.1.1",
-    "conversation": "0.1.2",
-    "binary classification": "0.2.1",
-    "multiclass classification": "0.2.2",
-    "regression": "0.2.3",
-    "jailbreak": "0.2.4",
-    "positive and negative response preference": "0.2.5",
-    "response attribution": "1.0.1",
-    "positive & negative attribution": "1.0.1",
-    "positive and negative attribution": "1.0.1",
-    "residual concept detection": "2.0.1",
-    "layer direction similarity analysis": "2.0.2",
-    "brain concept visualization": "2.1.0",
-}
-
 
 def _load_xai_level_list() -> List[Tuple[str, str]]:
     """
-    Parse XAI_LEVEL_NAMES from config as ordered list of (level, name).
-    Preserves config order and duplicate level keys (e.g. two 0.1 entries).
+    Parse XAI_LEVEL_NAMES from config as ordered list of (name, name).
+    Uses task name as key directly (no numeric IDs).
     """
     if not CONFIG_PATH.exists():
         return [
-            ("0.1", "Positive and Negative Response Preference"),
-            ("1.1", "Response Attribution"),
+            ("Positive and Negative Response Preference", "Positive and Negative Response Preference"),
+            ("Response Attribution", "Response Attribution"),
         ]
 
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -43,21 +27,6 @@ def _load_xai_level_list() -> List[Tuple[str, str]]:
         return []
 
     result: List[Tuple[str, str]] = []
-    used_levels = set()
-
-    def _assign_level_id(name: str, major: int, idx: int) -> str:
-        key = (name or "").strip().lower()
-        mapped = _KNOWN_NAME_TO_LEVEL.get(key)
-        if mapped and mapped not in used_levels:
-            return mapped
-        # fallback: major.<idx+1>, ensure uniqueness
-        base = f"{major}.{idx + 1}"
-        candidate = base
-        suffix = 1
-        while candidate in used_levels:
-            suffix += 1
-            candidate = f"{base}.{suffix}"
-        return candidate
 
     if isinstance(raw, list):
         for item in raw:
@@ -66,17 +35,11 @@ def _load_xai_level_list() -> List[Tuple[str, str]]:
             for k, v in item.items():
                 key = str(k).strip()
                 if key.upper().startswith("LEVEL_") and isinstance(v, list):
-                    try:
-                        major = int(key.split("_", 1)[1])
-                    except (ValueError, IndexError):
-                        major = 0
-                    for idx, name in enumerate(v):
+                    for name in v:
                         label = str(name).strip()
                         if not label:
                             continue
-                        level_id = _assign_level_id(label, major, idx)
-                        used_levels.add(level_id)
-                        result.append((level_id, label))
+                        result.append((label, label))
                 else:
                     result.append((str(k).strip(), str(v).strip()))
     elif isinstance(raw, dict):
@@ -87,31 +50,41 @@ def _load_xai_level_list() -> List[Tuple[str, str]]:
 
 def get_xai_level_names_grouped() -> Dict[int, List[Tuple[str, str]]]:
     """
-    Return levels grouped by integer part from config list order.
-    E.g. {0: [(0.1, "Simple Generation"), (0.1, "Positive and ..."), (0.2, "Binary ..."), ...], 1: [...], ...}
+    Return levels grouped by category index (0, 1, 2) for layout.
+    Values are (name, name) - name used as key directly.
     """
     ordered = _load_xai_level_list()
     grouped: Dict[int, List[Tuple[str, str]]] = {}
-    for level_str, name in ordered:
-        major = 0
-        try:
-            parts = str(level_str).strip().split(".")
-            if parts and parts[0].isdigit():
-                major = int(parts[0])
-            else:
-                major = int(float(level_str))
-        except (ValueError, TypeError):
-            major = 0
-        if major not in grouped:
-            grouped[major] = []
-        grouped[major].append((level_str, name))
-    return dict(sorted(grouped.items()))
+    group_idx = 0
+    if not ordered:
+        return {}
+
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    raw = data.get("XAI_LEVEL_NAMES") or []
+
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            for k, v in item.items():
+                if str(k).strip().upper().startswith("LEVEL_") and isinstance(v, list):
+                    items: List[Tuple[str, str]] = []
+                    for name in v:
+                        label = str(name).strip()
+                        if label:
+                            items.append((label, label))
+                    if items:
+                        grouped[group_idx] = items
+                        group_idx += 1
+
+    return grouped
 
 
 def get_xai_level_names() -> Dict[str, str]:
     """
-    Return XAI level -> name mapping (last occurrence per level for display).
-    Built from config list so all levels from config are included.
+    Return task name -> display name mapping.
+    Uses name as key (same as value).
     """
     ordered = _load_xai_level_list()
     return dict(ordered)

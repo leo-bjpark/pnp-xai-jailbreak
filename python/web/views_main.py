@@ -46,20 +46,17 @@ def index():
 
 
 def _task_template(level_key: str) -> str:
-    """Template name for task view by XAI level."""
-    if level_key == "0.1.1":
-        return "xai_0/completion.html"
-    if level_key == "0.1.2":
-        return "xai_0/conversation.html"
-    if level_key == "1.0.1":
-        return "xai_1/response_attribution.html"
-    if level_key == "2.0.1":
-        return "xai_2/residual_concept_detection.html"
-    if level_key == "2.0.2":
-        return "xai_2/layer_direction_similarity.html"
-    if level_key == "2.1.0":
-        return "xai_2/brain_concept.html"
-    return "xai_2/not_implemented.html"
+    """Template name for task view by task name."""
+    _NAME_TO_TEMPLATE = {
+        "Completion": "xai_0/completion.html",
+        "Conversation": "xai_0/conversation.html",
+        "Response Attribution": "xai_1/response_attribution.html",
+        "Positive & Negative Attribution": "xai_1/response_attribution.html",
+        "Residual Concept Detection": "xai_2/residual_concept_detection.html",
+        "Layer Direction Similarity Analysis": "xai_2/layer_direction_similarity.html",
+        "Brain Concept Visualization": "xai_2/brain_concept.html",
+    }
+    return _NAME_TO_TEMPLATE.get(level_key, "xai_2/not_implemented.html")
 
 
 def _render_task(task_id: str, level_key: str):
@@ -115,7 +112,7 @@ def task_view(task_id):
             dataset_pipelines=get_pipelines(),
             error="Task not found",
         )
-    level_key = task.get("xai_level", "0.1")
+    level_key = task.get("xai_level", "")
     return _render_task(task_id, level_key)
 
 

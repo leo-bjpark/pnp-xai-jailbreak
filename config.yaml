@@ -38,6 +38,7 @@ XAI_LEVEL_NAMES:
     - "Layer Direction Similarity Analysis"
     - "Brain Concept Visualization"
     - "Positive and Negative Response Preference"
+    - "Residual Concept Detection"
 
 TREATMENTS:
   - "Simple Steering"

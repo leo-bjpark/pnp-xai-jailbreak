@@ -61,7 +61,7 @@
   let session = { loaded_model: null, treatment: null };
   let loadInProgress = false;
   let pendingRunAfterConfirm = null;
-  let currentTaskLevel = "0.1"; // Selected XAI level when creating task
+  let currentTaskLevel = ""; // Selected task name when creating task
   let runAbortController = null; // abort the current /api/run request when user clicks Stop
   let taskLinkNavigateTimeout = null; // delay single-click navigate so double-click can cancel it for rename
   let modelSpecTooltipEl = null;
@@ -171,8 +171,7 @@
   }
 
   function xaiLevelToTaskTypeLabel(level) {
-    const map = { "0.1.1": "Completion", "0.1.2": "Conversation", "1.0.1": "Response Attribution" };
-    return (map[level] != null ? map[level] : (level || "—"));
+    return level || "—";
   }
 
   // Input Setting trigger: Task type (Completion|Conversation) | Model | Treatment | User-set name
@@ -883,33 +882,16 @@
 
   // Data variables (Working Memory) panel is now managed by static/js/working_memory.js
 
-  // ----- Create XAI: show full-screen name input, then add task -----
-  const modalCreateName = document.getElementById("modal-create-task-name");
-  const createNameInput = document.getElementById("create-task-name-input");
-  const createTaskCancel = document.getElementById("create-task-cancel");
-  const createTaskConfirm = document.getElementById("create-task-confirm");
+  // ----- Create XAI: create task with date:time title, then load it -----
+  function formatDateTime() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
 
-  let pendingCreate = null; // { level, name }
-
-  function showCreateTaskModal(level, defaultName) {
+  async function createTaskDirectly(level) {
     if (!level) return;
-    pendingCreate = { level, defaultName };
-    if (createNameInput) createNameInput.value = defaultName || "";
-    if (createNameInput) createNameInput.placeholder = "Enter task name";
-    modalCreateName?.classList.add("visible");
-    createNameInput?.focus();
-  }
-
-  function hideCreateTaskModal() {
-    modalCreateName.classList.remove("visible");
-    pendingCreate = null;
-  }
-
-  async function submitCreateTask() {
-    if (!pendingCreate) return;
-    const title = createNameInput.value.trim() || "Task";
-    const { level } = pendingCreate;
-    hideCreateTaskModal();
+    const title = formatDateTime();
     try {
       const res = await API.createTask({
         xai_level: level,
@@ -921,6 +903,7 @@
       if (res.error) throw new Error(res.error);
       const data = await API.tasksWithMeta();
       renderTaskList(data.tasks || data, data.xai_level_names || {});
+      window.location.href = "/task/" + res.task_id;
     } catch (err) {
       alert("Failed to add task: " + err.message);
     }
@@ -996,23 +979,13 @@
         window.location.href = href;
         return;
       }
-      if (level) showCreateTaskModal(level, name);
+      if (level) createTaskDirectly(level);
     });
   }
 
   document.addEventListener("click", (e) => {
     if (e.target.closest(".create-task-wrap")) return;
     toggleCreateTaskPicker(false);
-  });
-
-  createTaskCancel?.addEventListener("click", hideCreateTaskModal);
-  createTaskConfirm?.addEventListener("click", submitCreateTask);
-  createNameInput?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") submitCreateTask();
-    if (e.key === "Escape") hideCreateTaskModal();
-  });
-  modalCreateName?.addEventListener("click", (e) => {
-    if (e.target === modalCreateName) hideCreateTaskModal();
   });
 
   // Run button: show Play+RUN or Square+Stop
@@ -1092,7 +1065,7 @@
   }
 
   function maybeAppendChatClosed() {
-    if (!(window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0")) return;
+    if (!(window.PNP_CURRENT_TASK_LEVEL === "Conversation" || window.PNP_CURRENT_TASK_LEVEL === "Brain Concept Visualization")) return;
     const taskId = window.PNP_CURRENT_TASK_ID || "";
     if (!getChatClosedFlag(taskId)) return;
     appendConversationDivider("Previous conversation (read-only)");
@@ -1109,7 +1082,7 @@
     const model = el.sidebarModel.value;
     const treatment = el.sidebarTreatment.value.trim() || "";
     const inputSetting = { ...gatherTaskInput(), model, treatment };
-    if (window.PNP_CURRENT_TASK_LEVEL === "2.0.1") {
+    if (window.PNP_CURRENT_TASK_LEVEL === "Residual Concept Detection") {
       let layerCfg = window.PNP_LAYER_CONFIG && window.PNP_LAYER_CONFIG[model];
       if (!layerCfg && model && inputSetting.variable_name) {
         try {
@@ -1132,7 +1105,7 @@
     }
 
     let conversationUserContent = "";
-    if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
+    if (window.PNP_CURRENT_TASK_LEVEL === "Conversation" || window.PNP_CURRENT_TASK_LEVEL === "Brain Concept Visualization") {
       if (typeof window.PNP_getConversationUserInput === "function") {
         conversationUserContent = window.PNP_getConversationUserInput();
       } else {
@@ -1166,11 +1139,11 @@
     const generationStatus = document.getElementById("generation-status");
     setRunButtonState(true);
     if (generationStatus) {
-      generationStatus.textContent = "Working on it...";
+      generationStatus.textContent = "Please Wait...";
       generationStatus.classList.add("visible");
     }
     try {
-      if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
+      if (window.PNP_CURRENT_TASK_LEVEL === "Conversation" || window.PNP_CURRENT_TASK_LEVEL === "Brain Concept Visualization") {
         const userContent = conversationUserContent;
         if (userContent && window.PNP_appendConversationMessage && window.PNP_appendConversationMessageGenerating) {
           window.PNP_appendConversationMessage("user", userContent);
@@ -1180,7 +1153,7 @@
       }
       let res;
       const runBody = { model, treatment, input_setting: inputSetting };
-      const isResidualStream = window.PNP_CURRENT_TASK_LEVEL === "2.0.1" && (inputSetting.variable_name || "").trim();
+      const isResidualStream = window.PNP_CURRENT_TASK_LEVEL === "Residual Concept Detection" && (inputSetting.variable_name || "").trim();
 
       if (isResidualStream) {
         try {
@@ -1473,7 +1446,7 @@
       const key = el.dataset.taskInput || el.name || el.id;
       if (key) obj[key] = el.value !== undefined ? el.value : el.textContent;
     });
-    if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
+    if (window.PNP_CURRENT_TASK_LEVEL === "Conversation" || window.PNP_CURRENT_TASK_LEVEL === "Brain Concept Visualization") {
       const contentEl = document.getElementById("conversation-user-input");
       const systemEl = document.getElementById("input-system-instruction");
       const content = (contentEl && contentEl.value ? contentEl.value : "").trim();
@@ -1485,7 +1458,7 @@
         obj.content = content;
       }
     }
-    if (window.PNP_CURRENT_TASK_LEVEL === "2.0.1") {
+    if (window.PNP_CURRENT_TASK_LEVEL === "Residual Concept Detection") {
       const modeEl = document.getElementById("input-token-location-mode");
       const idsEl = document.getElementById("input-token-ids");
       const mode = (modeEl && modeEl.value) || "full";
@@ -1499,7 +1472,7 @@
   if (el.btnRun) {
     el.btnRun.addEventListener("click", () => {
       if (el.btnRun.classList.contains("is-running")) {
-        if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
+        if (window.PNP_CURRENT_TASK_LEVEL === "Conversation" || window.PNP_CURRENT_TASK_LEVEL === "Brain Concept Visualization") {
           if (typeof window.PNP_showStatusToast === "function") {
             window.PNP_showStatusToast("Wait for the current response to finish.", "error");
           }
@@ -1680,8 +1653,7 @@
 
     const fragment = document.createDocumentFragment();
     for (const [level, items] of entries) {
-      const levelKey = level.replace("xai_level_", "").replace(/_/g, ".");
-      const levelLabel = levelKey + (xaiLevelNames[levelKey] ? " — " + xaiLevelNames[levelKey] : "");
+      const levelLabel = level;
       const group = document.createElement("li");
       group.className = "task-panel-group";
       group.innerHTML = `
@@ -1717,7 +1689,7 @@
   function loadTaskIntoView(task) {
     if (!task) return;
     window.PNP_CURRENT_TASK_ID = task.id;
-    currentTaskLevel = task.xai_level || "0.1";
+    currentTaskLevel = task.xai_level || "";
 
     // Load default (current session), overlay with task data if present
     if (el.sidebarModel && task.model) el.sidebarModel.value = task.model;
@@ -1736,7 +1708,7 @@
     }
     updateInputSettingTriggerText();
 
-    if (task.xai_level === "0.1.1" || task.xai_level === "0.1.2" || task.xai_level === "1.0.1") {
+    if (task.xai_level === "Completion" || task.xai_level === "Conversation" || task.xai_level === "Response Attribution") {
       el.inputSettingPanel?.classList.add("visible");
       el.inputSettingTrigger?.classList.add("has-setting");
     }
@@ -1868,7 +1840,7 @@
         taskLinkNavigateTimeout = setTimeout(() => {
           taskLinkNavigateTimeout = null;
           if (isSwitchingTask) {
-            if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
+            if (window.PNP_CURRENT_TASK_LEVEL === "Conversation" || window.PNP_CURRENT_TASK_LEVEL === "Brain Concept Visualization") {
               appendConversationDivider("Previous conversation (read-only)");
               setChatClosedFlag(window.PNP_CURRENT_TASK_ID || "");
               fetch("/api/transformer_cache/clear", { method: "POST", keepalive: true }).catch(() => {});
@@ -2307,13 +2279,9 @@
         el.treatmentPanel.classList.remove("visible");
       }
       if (createLevel) {
-        const option = document.querySelector(`.create-task-option[data-level="${createLevel}"]`);
-        showCreateTaskModal(createLevel, "");
+        createTaskDirectly(createLevel);
       }
-      if (el.inputSettingPanel) {
-        el.inputSettingPanel.classList.remove("visible");
-        el.inputSettingTrigger?.classList.remove("has-setting");
-      }
+      // Input setting panel: keep visible by default so user knows what to do
       maybeAppendChatClosed();
       if (el.resultsContent && el.resultsContent.querySelector(".results-attribution-wrap")) {
         if (window.PNP_initAttributionGradientControls) window.PNP_initAttributionGradientControls(el.resultsContent);

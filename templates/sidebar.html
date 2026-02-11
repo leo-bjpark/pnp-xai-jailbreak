@@ -10,11 +10,6 @@
         autocomplete="off"
       />
       <div class="sidebar-picker create-task-picker" id="create-task-picker" aria-hidden="true">
-        <div class="create-task-grid-header">
-          <span>LEVEL 0</span>
-          <span>LEVEL 1</span>
-          <span>LEVEL 2</span>
-        </div>
         <div class="create-task-grid" id="create-task-picker-list">
           {% for level_num in [0, 1, 2] %}
           <div class="create-task-column" data-group="{{ level_num }}">
@@ -144,7 +139,7 @@
       <li class="task-panel-group">
         <div class="task-panel-group-title">
           {% if is_index %}<span class="task-panel-chevron" aria-hidden="true">▼</span>{% endif %}
-          <span class="task-panel-group-label">{% set level_key = level.replace('xai_level_', '').replace('_', '.') %}{{ level_key }}{% if xai_level_names %} — {{ xai_level_names.get(level_key, '') }}{% endif %}</span>
+          <span class="task-panel-group-label">{{ level }}</span>
         </div>
         <ul class="task-panel-sublist">
           {% for t in items %}

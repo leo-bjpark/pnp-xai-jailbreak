@@ -31,7 +31,7 @@ def api_get_task(task_id):
 @tasks_bp.post("/api/tasks")
 def api_create_task():
     data = request.get_json(force=True) or {}
-    xai_level = data.get("xai_level", "0.1")
+    xai_level = data.get("xai_level", "")
     title = data.get("title", "Untitled Task")
     model = data.get("model", "")
     treatment = data.get("treatment", "")

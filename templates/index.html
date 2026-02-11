@@ -23,12 +23,12 @@
           RUN
         </button>
         <span id="generation-status" class="generation-status" aria-live="polite"></span>
-        <button type="button" class="input-setting-trigger" id="input-setting-trigger" title="테스크, 모델, Treatment, 이름 정보" data-task-title="" data-task-model="" data-task-treatment="">
+        <button type="button" class="input-setting-trigger has-setting" id="input-setting-trigger" title="테스크, 모델, Treatment, 이름 정보" data-task-title="" data-task-model="" data-task-treatment="">
           — | — | None | —
         </button>
       </div>
 
-      <div class="input-setting-panel" id="input-setting-panel">
+      <div class="input-setting-panel visible" id="input-setting-panel">
         <div class="input-setting-body" id="input-setting-body">
           <p class="input-setting-hint">Configure inputs tailored to the selected task. Content varies by XAI level / task type.</p>
         </div>
@@ -46,18 +46,6 @@
         <div class="results-content" id="results-content"></div>
       </div>
     </main>
-  </div>
-
-  <!-- Modal: full-screen task name input -->
-  <div class="modal-overlay modal-fullscreen" id="modal-create-task-name">
-    <div class="modal-create-task-inner">
-      <h2 class="modal-create-task-title">Enter task name</h2>
-      <input type="text" id="create-task-name-input" class="create-task-name-input" placeholder="Task name" />
-      <div class="modal-create-task-actions">
-        <button type="button" class="modal-btn-cancel" id="create-task-cancel">Cancel</button>
-        <button type="button" class="modal-btn-confirm" id="create-task-confirm">Create</button>
-      </div>
-    </div>
   </div>
 
   <!-- Modal: confirm model load when session mismatch -->

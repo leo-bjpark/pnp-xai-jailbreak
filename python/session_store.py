@@ -17,15 +17,48 @@ def _ensure_data_dir() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
+_OLD_KEY_TO_NAME = {
+    "xai_level_0_1_1": "Completion",
+    "xai_level_0_1_2": "Conversation",
+    "xai_level_1_0_1": "Response Attribution",
+    "xai_level_2_0_1": "Residual Concept Detection",
+    "xai_level_2_0_2": "Layer Direction Similarity Analysis",
+    "xai_level_2_1_0": "Brain Concept Visualization",
+}
+
+
+def _migrate_legacy_tasks(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Migrate old numeric keys (xai_level_0_1_1 etc.) to name-based keys."""
+    migrated = False
+    result: Dict[str, Any] = {}
+    for key, tasks in data.items():
+        if not isinstance(tasks, list):
+            continue
+        new_key = _OLD_KEY_TO_NAME.get(key)
+        if new_key:
+            migrated = True
+            for t in tasks:
+                tc = dict(t) if isinstance(t, dict) else t
+                if isinstance(tc, dict):
+                    tc["xai_level"] = new_key
+                result.setdefault(new_key, []).append(tc)
+        elif not key.startswith("xai_level_"):
+            result[key] = tasks
+    if migrated:
+        _save_tasks(result)
+    return result
+
+
 def _load_tasks() -> Dict[str, Any]:
     _ensure_data_dir()
     if not TASKS_FILE.exists():
-        return {"xai_level_0": [], "xai_level_1": []}
+        return {}
     try:
         with open(TASKS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        return _migrate_legacy_tasks(data)
     except (json.JSONDecodeError, IOError):
-        return {"xai_level_0": [], "xai_level_1": []}
+        return {}
 
 
 def _save_tasks(data: Dict[str, Any]) -> None:
@@ -35,17 +68,16 @@ def _save_tasks(data: Dict[str, Any]) -> None:
 
 
 def _level_to_key(xai_level: str) -> str:
-    """Convert level like 0.1, 1.1 to storage key xai_level_0_1, xai_level_1_1."""
-    normalized = str(xai_level).replace(".", "_")
-    return f"xai_level_{normalized}" if not normalized.startswith("xai_level_") else normalized
+    """Use task name as storage key directly."""
+    return str(xai_level).strip()
 
 
 def get_tasks(xai_level_names: Optional[Dict[str, str]] = None) -> Dict[str, List[Dict[str, Any]]]:
-    """Return all tasks grouped by XAI level. Uses xai_level_names for structure if provided."""
+    """Return all tasks grouped by task name. Uses xai_level_names for structure if provided."""
     data = _load_tasks()
     if xai_level_names:
         result = {}
-        for level in sorted(xai_level_names.keys(), key=lambda x: [int(p) for p in str(x).split(".")]):
+        for level in xai_level_names.keys():
             key = _level_to_key(level)
             result[key] = data.get(key, [])
         return result
@@ -158,9 +190,9 @@ def clear_all_tasks(xai_level_names: Optional[Dict[str, str]] = None) -> None:
     """Delete all tasks. Keeps structure from xai_level_names if provided."""
     if xai_level_names:
         data = {}
-        for level in sorted(xai_level_names.keys(), key=lambda x: [int(p) for p in str(x).split(".")]):
+        for level in xai_level_names.keys():
             key = _level_to_key(level)
             data[key] = []
     else:
-        data = {"xai_level_0": [], "xai_level_1": []}
+        data = {}
     _save_tasks(data)
