@@ -271,6 +271,20 @@
         status.textContent = 'Select a residual variable first.';
         return;
       }
+      if (window.PNP_ensureVariableLoaded) {
+        window.PNP_ensureVariableLoaded(varName).then(function(ok) {
+          if (!ok) {
+            status.textContent = 'Load the variable to continue.';
+            return;
+          }
+          runAnalysisAfterLoad(varName, btn, status, out);
+        });
+        return;
+      }
+      runAnalysisAfterLoad(varName, btn, status, out);
+    }
+
+    function runAnalysisAfterLoad(varName, btn, status, out) {
       btn.disabled = true;
       status.textContent = 'Loading...';
       out.innerHTML = '';
@@ -371,8 +385,8 @@
         sel.innerHTML = '<option value="">— Select residual variable —</option>';
         vars.forEach(function(v) {
           var opt = document.createElement('option');
-          opt.value = v.name || '';
-          opt.textContent = (v.name || '') + (v.task_name ? ' (' + v.task_name + ')' : '');
+          opt.value = v.id || '';
+          opt.textContent = (v.name || v.id || '') + (v.task_name ? ' (' + v.task_name + ')' : '');
           sel.appendChild(opt);
         });
       }).catch(function() {});

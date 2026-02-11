@@ -30,6 +30,9 @@
   const btnProcessedShowMore = document.getElementById("btn-processed-show-more");
   const btnSaveDataVar = document.getElementById("btn-save-data-var");
   const dataVarAdditionalInput = document.getElementById("data-var-additional-naming");
+  const pipelineJsonEl = document.getElementById("data-pipeline-result-json");
+  const datasetPicker = document.getElementById("dataset-picker");
+  const datasetPickerList = document.getElementById("dataset-picker-list");
 
   const EXAMPLES_STEP = 5;
   const INDENT_SPACES = 4;
@@ -55,6 +58,40 @@
     const div = document.createElement("div");
     div.textContent = s;
     return div.innerHTML;
+  }
+
+  function toggleDatasetPicker(show) {
+    if (!datasetPicker) return;
+    datasetPicker.classList.toggle("visible", !!show);
+    datasetPicker.setAttribute("aria-hidden", show ? "false" : "true");
+  }
+
+  function filterDatasetPicker(query) {
+    if (!datasetPickerList) return;
+    const q = (query || "").toLowerCase().trim();
+    datasetPickerList.querySelectorAll(".data-picker-item").forEach((el) => {
+      const name = (el.dataset.value || "").toLowerCase();
+      const group = (el.dataset.group || "").toLowerCase();
+      const match = !q || name.includes(q) || group.includes(q);
+      el.style.display = match ? "" : "none";
+    });
+  }
+
+  async function refreshPipelineMeta() {
+    if (!pipelineJsonEl) return;
+    try {
+      const res = await fetch("/api/dataset-pipelines/" + encodeURIComponent(pipelineId));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      pipelineJsonEl.textContent = JSON.stringify(data, null, 2);
+      const listItem = document.querySelector(
+        '.dataset-pipeline-item[data-pipeline-id="' + pipelineId + '"] .dataset-pipeline-link'
+      );
+      if (listItem) {
+        const nameEl = listItem.querySelector(".dataset-pipeline-name");
+        if (nameEl) nameEl.textContent = (data.name || "Unnamed");
+      }
+    } catch (_) {}
   }
 
   function cellContent(row, col) {
@@ -297,11 +334,36 @@
         if (typeof updateSaveButtonState === "function") updateSaveButtonState();
         const code = (processingCodeTextarea && processingCodeTextarea.value) || "";
         renderBatch(data.dataset_info, path, window.PNP_PROCESSED_DATASET_INFO || null, code);
+        refreshPipelineMeta();
       } catch (err) {
         showMessage(loadMessage, err.message || "Load failed", "error");
       }
     });
   }
+
+  if (pathInput) {
+    pathInput.addEventListener("focus", () => {
+      toggleDatasetPicker(true);
+      filterDatasetPicker(pathInput.value);
+    });
+    pathInput.addEventListener("input", () => {
+      filterDatasetPicker(pathInput.value);
+      toggleDatasetPicker(true);
+    });
+  }
+  if (datasetPickerList) {
+    datasetPickerList.addEventListener("click", (e) => {
+      const item = e.target.closest(".data-picker-item");
+      if (!item || !pathInput) return;
+      pathInput.value = item.dataset.value || "";
+      toggleDatasetPicker(false);
+    });
+  }
+  document.addEventListener("click", (e) => {
+    if (!datasetPicker) return;
+    if (e.target.closest("#dataset-picker") || e.target === pathInput) return;
+    toggleDatasetPicker(false);
+  });
 
   if (applyBtn && processingCodeTextarea) {
     applyBtn.addEventListener("click", async () => {
@@ -328,6 +390,7 @@
         currentProcessedInfo = data.processed_dataset_info || null;
         currentProcessingCode = code;
         window.PNP_PROCESSED_DATASET_INFO = currentProcessedInfo;
+        refreshPipelineMeta();
         processedVisibleCount = EXAMPLES_STEP;
         if (processedContent) processedContent.style.display = "block";
         if (placeholderRight) placeholderRight.style.display = "none";

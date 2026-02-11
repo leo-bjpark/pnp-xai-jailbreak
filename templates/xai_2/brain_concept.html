@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ task.title }} - PnP-XAI-LLM</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem('pnp-xai-theme')||'light';</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ide.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/xai_0/xai_0.css') }}" />
+</head>
+<body>
+  {% set export_as_link = true %}
+  {% include 'header.html' with context %}
+
+  <div class="main-layout">
+    {% set is_index = false %}
+    {% include 'sidebar.html' with context %}
+
+    <main class="content-area">
+      <div class="content-toolbar">
+        <button type="button" class="btn-run" id="btn-run">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          RUN
+        </button>
+        <span id="generation-status" class="generation-status" aria-live="polite"></span>
+        <button type="button" class="input-setting-trigger" id="input-setting-trigger" title="Task, Model, Treatment, Name" data-task-type="Brain Concept Visualization" data-task-name="{{ task.name or task.title or '' }}" data-task-model="{{ task.model or '' }}" data-task-treatment="{{ task.treatment or '' }}">
+          Brain Concept Visualization | {{ task.model or '—' }} | {{ task.treatment or 'None' }} | {{ task.name or task.title or '—' }}
+        </button>
+      </div>
+
+      <div class="input-setting-panel" id="input-setting-panel">
+        <div class="input-setting-body" id="input-setting-body">
+          <p class="input-setting-hint">Chat generation with Brain Concept Map: answer shows which concepts activate (right panel). Enter message and RUN.</p>
+          <div class="input-setting-form input-setting-form-row">
+            <div class="input-setting-cell">
+              <label for="input-completion-temperature">Temperature</label>
+              <input type="number" id="input-completion-temperature" name="temperature" data-task-input="temperature" class="input-setting-field" min="0" max="2" step="0.1" value="{{ (task.result or {}).get('temperature', 0.7) }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-completion-max-new-tokens">Max new tokens</label>
+              <input type="number" id="input-completion-max-new-tokens" name="max_new_tokens" data-task-input="max_new_tokens" class="input-setting-field" min="1" max="4096" step="1" value="{{ (task.result or {}).get('max_new_tokens', 256) }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-completion-top-p">Top-P</label>
+              <input type="number" id="input-completion-top-p" name="top_p" data-task-input="top_p" class="input-setting-field" min="0" max="1" step="0.05" value="{{ (task.result or {}).get('top_p', 1.0) }}" />
+            </div>
+            <div class="input-setting-cell">
+              <label for="input-completion-top-k">Top-K</label>
+              <input type="number" id="input-completion-top-k" name="top_k" data-task-input="top_k" class="input-setting-field" min="0" max="1000" step="1" value="{{ (task.result or {}).get('top_k', 50) }}" />
+            </div>
+            <div class="input-setting-cell input-setting-cell-system">
+              <label for="input-system-instruction">System Instruction</label>
+              <textarea id="input-system-instruction" name="system_instruction" data-task-input="system_instruction" class="input-setting-field input-setting-textarea" rows="1" placeholder="e.g. You are a helpful assistant. Answer briefly.">{{ (task.result or {}).get('system_instruction', 'You are a helpful assistant.') }}</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="results-area results-area-conversation">
+        <div class="conversation-wrap" id="conversation-wrap" data-cumulative-generated="{{ (task.result or {}).get('cumulative_generated_tokens', 0) }}">
+          <div class="conversation-log" id="conversation-log" aria-live="polite"></div>
+          <div class="conversation-input-row" id="conversation-input-row">
+            <div class="input-wrap">
+              <textarea id="conversation-user-input" placeholder="Enter message, then RUN..." rows="3"></textarea>
+            </div>
+          </div>
+          <details class="results-completion-meta conversation-result-meta" id="conversation-result-meta">
+            <summary>Parameters &amp; full result</summary>
+            <pre class="results-json" id="conversation-result-json">{% if task.result %}{{ task.result | tojson(indent=2) }}{% endif %}</pre>
+          </details>
+        </div>
+        <aside class="conversation-side-panel brain-side-only" id="conversation-side-panel">
+          <div class="conversation-side-card brain-viz-card">
+            <h4 class="conversation-side-title">Brain Concept Map</h4>
+            <p class="brain-viz-hint">활성화된 개념 (생성 시 시뮬레이션)</p>
+            <div class="brain-tokens-section">
+              <div class="brain-tokens-header">
+                <span class="brain-tokens-label">Tokens</span>
+                <div class="brain-sim-controls">
+                  <button type="button" class="brain-sim-btn" id="brain-sim-start" title="시뮬레이션 시작">Start</button>
+                  <button type="button" class="brain-sim-btn" id="brain-sim-stop" title="시뮬레이션 정지" disabled>Stop</button>
+                  <label class="brain-speed-label">Speed <input type="range" id="brain-sim-speed" min="0.5" max="4" step="0.5" value="1.5" title="토큰/초"> <span id="brain-sim-speed-value">1.5</span>/s</label>
+                </div>
+              </div>
+              <div class="brain-tokens-wrap" id="brain-tokens-wrap">
+                <div class="brain-tokens-list" id="brain-tokens-list"></div>
+                <div class="brain-tokens-empty" id="brain-tokens-empty">생성된 응답이 없습니다. RUN 후 토큰이 표시됩니다.</div>
+              </div>
+            </div>
+            <div class="brain-viz-wrap" id="brain-viz-wrap">
+              <svg class="brain-viz-svg" id="brain-viz-svg" viewBox="-5.5 -2.5 10 5" xmlns="http://www.w3.org/2000/svg" aria-label="Brain concept map"></svg>
+              <div class="brain-viz-loading" id="brain-viz-loading">Loading…</div>
+              <div class="brain-viz-empty" id="brain-viz-empty" style="display:none;">No brain config.</div>
+            </div>
+            <div class="brain-timeseries-section" id="brain-timeseries-section">
+              <div class="brain-timeseries-header">
+                <span class="brain-timeseries-title" id="brain-timeseries-title">Concept timeseries</span>
+              </div>
+              <div class="brain-timeseries-chart-wrap" id="brain-timeseries-chart-wrap">
+                <svg class="brain-timeseries-svg" id="brain-timeseries-svg" xmlns="http://www.w3.org/2000/svg" aria-label="Concept activation over tokens"></svg>
+                <div class="brain-timeseries-token-axis" id="brain-timeseries-token-axis"></div>
+                <div class="brain-timeseries-placeholder" id="brain-timeseries-placeholder">노드를 클릭하면 해당 개념의 활성화 시계열이 표시됩니다.</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="modal-confirm-load">
+    <div class="modal-dialog">
+      <h3>Confirm Model Load</h3>
+      <p id="modal-message">Loaded Model + Treatment does not match the current session. Load the model with this setting?</p>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-cancel" id="modal-cancel">Cancel</button>
+        <button type="button" class="modal-btn-confirm" id="modal-confirm">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/working_memory.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/memory_panels.js') }}"></script>
+  <script>window.PNP_CURRENT_TASK_ID = {{ task.id | tojson }}; window.PNP_CURRENT_TASK_LEVEL = {{ task.xai_level | tojson }};</script>
+  <script>window.PNP_RESTORE_CONVERSATION = {% if task.result and task.result.get('conversation_list') %}{{ task.result.conversation_list | tojson | safe }}{% else %}null{% endif %};</script>
+  <script>window.PNP_RESTORE_CONVERSATION_HISTORY = {% if task.result and task.result.get('conversation_history') %}{{ task.result.conversation_history | tojson | safe }}{% else %}null{% endif %};</script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script>
+  (function() {
+    var log = document.getElementById("conversation-log");
+    var userInput = document.getElementById("conversation-user-input");
+    window.PNP_conversationMessages = [];
+    window.PNP_conversationHistory = [];
+
+    function escapeHtml(s) {
+      if (s == null) return "";
+      var div = document.createElement("div");
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    function pushHistory(role, content) {
+      window.PNP_conversationHistory = window.PNP_conversationHistory || [];
+      window.PNP_conversationHistory.push({ role: role, content: content || "" });
+    }
+
+    window.PNP_appendConversationMessage = function(role, content, skipPush) {
+      if (!log) return;
+      var msg = document.createElement("div");
+      msg.className = "conversation-msg " + role;
+      msg.innerHTML = "<span class=\"conversation-role\">" + (role === "user" ? "User" : "Assistant") + "</span>" +
+        "<div class=\"conversation-bubble\">" + escapeHtml(content) + "</div>";
+      log.appendChild(msg);
+      log.scrollTop = log.scrollHeight;
+      if (!skipPush && role === "user") {
+        window.PNP_conversationMessages.push({ role: "user", content: content || "" });
+        pushHistory("user", content);
+      }
+    };
+
+    window.PNP_getConversationMessagesForRun = function(newUserContent) {
+      var arr = window.PNP_conversationMessages ? window.PNP_conversationMessages.slice() : [];
+      arr.push({ role: "user", content: newUserContent || "" });
+      return arr;
+    };
+
+    window.PNP_appendAssistantMessage = function(content) {
+      window.PNP_conversationMessages = window.PNP_conversationMessages || [];
+      window.PNP_conversationMessages.push({ role: "assistant", content: content || "" });
+      pushHistory("assistant", content);
+    };
+
+    window.PNP_appendConversationMessageGenerating = function() {
+      if (!log) return;
+      var msg = document.createElement("div");
+      msg.className = "conversation-msg assistant";
+      msg.setAttribute("data-generating", "true");
+      msg.innerHTML = "<span class=\"conversation-role\">Assistant</span>" +
+        "<div class=\"conversation-bubble conversation-generating\"><span class=\"conversation-generating-text\">Generating</span><span class=\"conversation-generating-dots\"><span>.</span><span>.</span><span>.</span></span></div>";
+      log.appendChild(msg);
+      log.scrollTop = log.scrollHeight;
+    };
+
+    window.PNP_finishGeneratingMessage = function(content, isError) {
+      if (!log) return;
+      var generatingMsg = log.querySelector(".conversation-msg[data-generating=\"true\"]");
+      if (!generatingMsg) return;
+      generatingMsg.removeAttribute("data-generating");
+      var bubble = generatingMsg.querySelector(".conversation-bubble");
+      if (bubble) {
+        bubble.classList.remove("conversation-generating");
+        bubble.textContent = content != null ? content : "";
+        if (isError) bubble.classList.add("conversation-error");
+      }
+      log.scrollTop = log.scrollHeight;
+    };
+
+    window.PNP_updateConversationTokenCount = function(inputTokens, generatedTokens, cumulativeGenerated) {
+      var wrap = document.getElementById("conversation-token-count-wrap");
+      var inputEl = document.getElementById("conversation-token-input-value");
+      var generatedEl = document.getElementById("conversation-token-generated-value");
+      var cumulativeEl = document.getElementById("conversation-token-cumulative-value");
+      if (wrap) wrap.classList.add("visible");
+      if (inputEl) inputEl.textContent = inputTokens != null ? inputTokens : "—";
+      if (generatedEl) generatedEl.textContent = generatedTokens != null ? generatedTokens : "—";
+      if (cumulativeEl) cumulativeEl.textContent = cumulativeGenerated != null && cumulativeGenerated >= 0 ? cumulativeGenerated : "—";
+    };
+
+    window.PNP_updateConversationCacheCount = function(count) {
+      var el = document.getElementById("conversation-cache-count-value");
+      if (el) el.textContent = count != null ? count : 0;
+    };
+
+    window.PNP_getConversationUserInput = function() {
+      return (userInput && userInput.value) ? userInput.value.trim() : "";
+    };
+
+    window.PNP_clearConversationUserInput = function() {
+      if (userInput) userInput.value = "";
+    };
+
+    var btnClearCache = document.getElementById("btn-clear-cache");
+    if (btnClearCache) {
+      btnClearCache.addEventListener("click", function() {
+        var taskId = window.PNP_CURRENT_TASK_ID;
+        var trigger = document.getElementById("input-setting-trigger");
+        var model = (trigger && trigger.dataset.taskModel) || "";
+        var treatment = (trigger && trigger.dataset.taskTreatment) || "";
+        var name = (trigger && trigger.dataset.taskName) || "";
+        if (taskId) {
+          var key = taskId + "|" + model + "|" + treatment + "|" + name;
+          fetch("/api/memory/session/unregister/" + encodeURIComponent(key), { method: "DELETE" })
+            .then(function() { if (typeof window.refreshMemorySummary === "function") window.refreshMemorySummary(); })
+            .catch(function() {});
+        }
+        window.PNP_conversationMessages = [];
+        if (window.PNP_updateConversationCacheCount) window.PNP_updateConversationCacheCount(0);
+        if (window.PNP_updateConversationTokenCount) window.PNP_updateConversationTokenCount(null, null, 0);
+        var wrapEl = document.getElementById("conversation-token-count-wrap");
+        if (wrapEl) wrapEl.classList.remove("visible");
+        var wrap = document.getElementById("conversation-wrap");
+        if (wrap) wrap.dataset.cumulativeGenerated = "0";
+        if (log) log.innerHTML = "";
+      });
+    }
+
+    var wrap = document.getElementById("conversation-wrap");
+    var cum = wrap && wrap.dataset.cumulativeGenerated ? parseInt(wrap.dataset.cumulativeGenerated, 10) : 0;
+
+    if (window.PNP_RESTORE_CONVERSATION_HISTORY && Array.isArray(window.PNP_RESTORE_CONVERSATION_HISTORY)) {
+      var historyList = window.PNP_RESTORE_CONVERSATION_HISTORY;
+      window.PNP_conversationHistory = historyList.map(function(m) {
+        return { role: m.role, content: m.content || "" };
+      });
+      window.PNP_conversationMessages = window.PNP_conversationHistory.slice();
+      for (var i = 0; i < historyList.length; i++) {
+        var hm = historyList[i];
+        window.PNP_appendConversationMessage(hm.role, hm.content || "", true);
+      }
+    } else if (window.PNP_RESTORE_CONVERSATION && window.PNP_RESTORE_CONVERSATION.messages && Array.isArray(window.PNP_RESTORE_CONVERSATION.messages)) {
+      var list = window.PNP_RESTORE_CONVERSATION.messages;
+      window.PNP_conversationHistory = list.map(function(m) {
+        return { role: (m.role === "ai" || m.role === "assistant") ? "assistant" : "user", content: m.content || "" };
+      });
+      window.PNP_conversationMessages = window.PNP_conversationHistory.slice();
+      for (var j = 0; j < list.length; j++) {
+        var m = list[j];
+        var role = (m.role === "ai" || m.role === "assistant") ? "assistant" : "user";
+        window.PNP_appendConversationMessage(role, m.content || "", true);
+      }
+    }
+
+    if (window.PNP_getChatClosedFlag && window.PNP_getChatClosedFlag(window.PNP_CURRENT_TASK_ID)) {
+      window.PNP_conversationMessages = [];
+      window.PNP_conversationHistory = window.PNP_conversationHistory || [];
+      if (window.PNP_updateConversationCacheCount) window.PNP_updateConversationCacheCount(0);
+      if (window.PNP_updateConversationTokenCount) window.PNP_updateConversationTokenCount(null, null, 0);
+      var wrapEl = document.getElementById("conversation-token-count-wrap");
+      if (wrapEl) wrapEl.classList.remove("visible");
+      var wrap = document.getElementById("conversation-wrap");
+      if (wrap) wrap.dataset.cumulativeGenerated = "0";
+    }
+
+    if (window.PNP_updateConversationTokenCount && cum > 0) {
+      var w = document.getElementById("conversation-token-count-wrap");
+      if (w) { w.classList.add("visible"); window.PNP_updateConversationTokenCount(null, null, cum); }
+    }
+
+    // ----- Brain Concept Map: 좌→우 뇌 형태, 영역별 색·이름, 노드 호버 정보 -----
+    (function() {
+      var svg = document.getElementById("brain-viz-svg");
+      var loading = document.getElementById("brain-viz-loading");
+      var empty = document.getElementById("brain-viz-empty");
+      var wrap = document.getElementById("brain-viz-wrap");
+      if (!svg || !wrap) return;
+
+      var nodes = [];
+      var nodeRadius = 0.1;
+      var LOBE_COLORS = {
+        frontal_lobe: "#6b9dc8",
+        parietal_lobe: "#7eb86a",
+        temporal_lobe: "#c9a83a",
+        occipital_lobe: "#8b6ba8",
+        cerebellum: "#c47d5c",
+        limbic_system: "#b85c52"
+      };
+      var LOBE_DARK = {
+        frontal_lobe: "#2d5f8a",
+        parietal_lobe: "#3d7a35",
+        temporal_lobe: "#9a7b20",
+        occipital_lobe: "#5c4080",
+        cerebellum: "#9a4d35",
+        limbic_system: "#8b3829"
+      };
+      var LOBE_LABELS = {
+        frontal_lobe: "Frontal",
+        parietal_lobe: "Parietal",
+        temporal_lobe: "Temporal",
+        occipital_lobe: "Occip.",
+        cerebellum: "Crer.",
+        limbic_system: "Limbic"
+      };
+      var viewMinX = -5.5, viewMinY = -2.5, viewW = 10, viewH = 5;
+
+      function toView(n) {
+        return { x: -n.y, y: n.x };
+      }
+
+      function convexHull(points) {
+        if (points.length < 3) return points.slice();
+        var sorted = points.slice().sort(function(a, b) { return a.x !== b.x ? a.x - b.x : a.y - b.y; });
+        var lower = [];
+        for (var i = 0; i < sorted.length; i++) {
+          while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], sorted[i]) <= 0) lower.pop();
+          lower.push(sorted[i]);
+        }
+        var upper = [];
+        for (var i = sorted.length - 1; i >= 0; i--) {
+          while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], sorted[i]) <= 0) upper.pop();
+          upper.push(sorted[i]);
+        }
+        lower.pop();
+        upper.pop();
+        return lower.concat(upper);
+      }
+      function cross(o, a, b) { return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x); }
+
+      function groupByLobe(nodes) {
+        var g = {};
+        nodes.forEach(function(n) {
+          var lobe = n.lobe || "other";
+          if (!g[lobe]) g[lobe] = [];
+          g[lobe].push(n);
+        });
+        return g;
+      }
+
+      function lobeCentroid(lobeNodes) {
+        var v = lobeNodes.map(toView);
+        var sx = 0, sy = 0;
+        v.forEach(function(p) { sx += p.x; sy += p.y; });
+        return { x: sx / v.length, y: sy / v.length };
+      }
+
+      function renderNodes(activeIds) {
+        activeIds = activeIds || [];
+        svg.innerHTML = "";
+        var byLobe = groupByLobe(nodes);
+
+        Object.keys(byLobe).forEach(function(lobe) {
+          var lobeNodes = byLobe[lobe];
+          var pts = lobeNodes.map(function(n) { return toView(n); });
+          var color = LOBE_COLORS[lobe] || "#999";
+          var hull = convexHull(pts);
+          if (hull.length >= 2) {
+            var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            var d = "M " + hull[0].x + " " + hull[0].y;
+            for (var i = 1; i < hull.length; i++) d += " L " + hull[i].x + " " + hull[i].y;
+            d += " Z";
+            path.setAttribute("d", d);
+            path.setAttribute("fill", color);
+            path.setAttribute("opacity", "0.14");
+            path.setAttribute("stroke", color);
+            path.setAttribute("stroke-width", "0.02");
+            path.setAttribute("stroke-opacity", "0.35");
+            path.setAttribute("class", "brain-region");
+            svg.appendChild(path);
+          }
+        });
+
+        Object.keys(byLobe).forEach(function(lobe) {
+          var lobeNodes = byLobe[lobe];
+          var c = lobeCentroid(lobeNodes);
+          var label = LOBE_LABELS[lobe] || lobe;
+          var textColor = LOBE_DARK[lobe] || "#333";
+          var text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.setAttribute("class", "brain-lobe-label");
+          text.setAttribute("x", c.x);
+          text.setAttribute("y", c.y);
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("dominant-baseline", "middle");
+          text.setAttribute("font-size", "0.34");
+          text.setAttribute("font-weight", "700");
+          text.setAttribute("fill", textColor);
+          text.setAttribute("letter-spacing", "0.02");
+          text.setAttribute("stroke", "rgba(255,255,255,0.6)");
+          text.setAttribute("stroke-width", "0.012");
+          text.setAttribute("paint-order", "stroke fill");
+          text.textContent = label;
+          svg.appendChild(text);
+        });
+
+        nodes.forEach(function(n) {
+          var v = toView(n);
+          var circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          var lobe = n.lobe || "other";
+          var color = (LOBE_DARK[lobe] || LOBE_COLORS[lobe] || "#666");
+          var isActive = activeIds.indexOf(n.id) >= 0;
+          var isSelected = n.id === selectedConceptId;
+          circle.setAttribute("class", "brain-node " + (isActive ? "brain-node--active" : "") + (isSelected ? " brain-node--selected" : "") + " brain-node--" + (lobe.replace("_", "-")));
+          circle.setAttribute("cx", v.x);
+          circle.setAttribute("cy", v.y);
+          circle.setAttribute("r", nodeRadius);
+          circle.setAttribute("fill", isActive ? "var(--accent)" : color);
+          circle.setAttribute("data-id", n.id);
+          circle.setAttribute("data-lobe", lobe);
+          circle.setAttribute("data-label", n.label);
+          circle.setAttribute("data-lobe-label", LOBE_LABELS[lobe] || lobe);
+          var title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+          title.textContent = n.label + "\n영역: " + (LOBE_LABELS[lobe] || lobe);
+          circle.appendChild(title);
+          svg.appendChild(circle);
+        });
+      }
+
+      function mockActivation() {
+        var count = Math.min(6, Math.max(2, Math.floor(nodes.length * 0.1)));
+        var pool = nodes.slice();
+        var active = [];
+        for (var i = 0; i < count && pool.length; i++) {
+          var idx = Math.floor(Math.random() * pool.length);
+          active.push(pool[idx].id);
+          pool.splice(idx, 1);
+        }
+        renderNodes(active);
+      }
+
+      window.PNP_brainVizSetActivated = function(ids) {
+        renderNodes(Array.isArray(ids) ? ids : []);
+      };
+      window.PNP_brainVizMockActivation = mockActivation;
+
+      var tooltipEl = document.createElement("div");
+      tooltipEl.className = "brain-viz-tooltip";
+      tooltipEl.setAttribute("aria-hidden", "true");
+      wrap.appendChild(tooltipEl);
+      svg.addEventListener("mouseover", function(e) {
+        var circle = e.target.closest("circle.brain-node");
+        if (!circle) { tooltipEl.style.display = "none"; return; }
+        var label = circle.getAttribute("data-label") || "";
+        var lobeLabel = circle.getAttribute("data-lobe-label") || "";
+        tooltipEl.textContent = label + " · " + lobeLabel;
+        tooltipEl.style.display = "block";
+      });
+      svg.addEventListener("mouseout", function(e) {
+        if (!e.relatedTarget || !wrap.contains(e.relatedTarget)) tooltipEl.style.display = "none";
+      });
+      svg.addEventListener("mousemove", function(e) {
+        if (tooltipEl.style.display !== "block") return;
+        var rect = wrap.getBoundingClientRect();
+        tooltipEl.style.left = (e.clientX - rect.left + 10) + "px";
+        tooltipEl.style.top = (e.clientY - rect.top + 6) + "px";
+      });
+
+      var tokenListEl = document.getElementById("brain-tokens-list");
+      var tokenWrapEl = document.getElementById("brain-tokens-wrap");
+      var tokenEmptyEl = document.getElementById("brain-tokens-empty");
+      var btnStart = document.getElementById("brain-sim-start");
+      var btnStop = document.getElementById("brain-sim-stop");
+      var speedInput = document.getElementById("brain-sim-speed");
+      var speedValueEl = document.getElementById("brain-sim-speed-value");
+
+      var tokenList = [];
+      var tokenActivations = [];
+      var conceptTimeseries = {};
+      var currentTokenIndex = -1;
+      var simulationTimer = null;
+      var selectedConceptId = null;
+      var selectedConceptLabel = null;
+
+      function tokenizeText(text) {
+        if (!text || typeof text !== "string") return [];
+        var t = text.trim();
+        if (!t) return [];
+        return t.split(/\s+/).filter(Boolean);
+      }
+
+      function buildTokenActivations(numTokens) {
+        var activations = [];
+        for (var i = 0; i < numTokens; i++) {
+          var count = Math.min(8, Math.max(2, Math.floor(nodes.length * 0.08)));
+          var pool = nodes.slice();
+          var active = [];
+          for (var j = 0; j < count && pool.length; j++) {
+            var idx = Math.floor(Math.random() * pool.length);
+            active.push(pool[idx].id);
+            pool.splice(idx, 1);
+          }
+          activations.push(active);
+        }
+        return activations;
+      }
+
+      function renderTokenStrip() {
+        if (!tokenListEl || !tokenWrapEl || !tokenEmptyEl) return;
+        tokenListEl.innerHTML = "";
+        if (tokenList.length === 0) {
+          tokenEmptyEl.style.display = "block";
+          return;
+        }
+        tokenEmptyEl.style.display = "none";
+        tokenList.forEach(function(tok, i) {
+          var span = document.createElement("span");
+          span.className = "brain-token" + (i === currentTokenIndex ? " brain-token--current" : "");
+          span.textContent = tok.length > 12 ? tok.slice(0, 11) + "…" : tok;
+          span.title = tok;
+          span.dataset.index = String(i);
+          tokenListEl.appendChild(span);
+        });
+        if (currentTokenIndex >= 0 && currentTokenIndex < tokenList.length) {
+          var currentSpan = tokenListEl.querySelector(".brain-token--current");
+          if (currentSpan) currentSpan.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+        }
+      }
+
+      function setCurrentToken(index) {
+        if (index < 0 || index >= tokenList.length) return;
+        currentTokenIndex = index;
+        if (window.PNP_brainVizSetActivated && tokenActivations[index]) {
+          window.PNP_brainVizSetActivated(tokenActivations[index]);
+        }
+        renderTokenStrip();
+        renderTimeseries();
+        renderTimeseriesTokenAxis();
+      }
+
+      function runSimulation() {
+        if (simulationTimer || tokenList.length === 0) return;
+        if (btnStart) btnStart.disabled = true;
+        if (btnStop) btnStop.disabled = false;
+        var speed = parseFloat(speedInput && speedInput.value ? speedInput.value : 1.5, 10) || 1.5;
+        var delay = Math.max(100, 1000 / speed);
+        var index = 0;
+        function tick() {
+          if (index >= tokenList.length) {
+            simulationTimer = null;
+            if (btnStart) btnStart.disabled = false;
+            if (btnStop) btnStop.disabled = true;
+            return;
+          }
+          setCurrentToken(index);
+          index++;
+          simulationTimer = setTimeout(tick, delay);
+        }
+        tick();
+      }
+
+      function stopSimulation() {
+        if (simulationTimer) {
+          clearTimeout(simulationTimer);
+          simulationTimer = null;
+        }
+        if (btnStart) btnStart.disabled = false;
+        if (btnStop) btnStop.disabled = true;
+      }
+
+      if (btnStart) btnStart.addEventListener("click", runSimulation);
+      if (btnStop) btnStop.addEventListener("click", stopSimulation);
+      if (speedInput && speedValueEl) {
+        speedInput.addEventListener("input", function() {
+          speedValueEl.textContent = speedInput.value;
+        });
+        speedValueEl.textContent = speedInput.value;
+      }
+
+      if (tokenListEl) {
+        tokenListEl.addEventListener("click", function(e) {
+          var span = e.target.closest(".brain-token");
+          if (!span || span.dataset.index == null) return;
+          stopSimulation();
+          setCurrentToken(parseInt(span.dataset.index, 10));
+        });
+      }
+
+      var tsSection = document.getElementById("brain-timeseries-section");
+      var tsTitle = document.getElementById("brain-timeseries-title");
+      var tsSvg = document.getElementById("brain-timeseries-svg");
+      var tsTokenAxis = document.getElementById("brain-timeseries-token-axis");
+      var tsPlaceholder = document.getElementById("brain-timeseries-placeholder");
+      var tsChartWrap = document.getElementById("brain-timeseries-chart-wrap");
+      var TS_HALF = 25;
+      var TS_HEIGHT = 56;
+      var TS_TOKEN_ROW = 22;
+      var TS_PAD = { left: 28, right: 8, top: 6, bottom: 18 };
+
+      function buildConceptTimeseries() {
+        conceptTimeseries = {};
+        if (!nodes.length || !tokenActivations.length) return;
+        nodes.forEach(function(n) {
+          var arr = [];
+          for (var i = 0; i < tokenActivations.length; i++) {
+            arr.push(tokenActivations[i].indexOf(n.id) >= 0 ? 1 : 0);
+          }
+          conceptTimeseries[n.id] = arr;
+        });
+      }
+
+      function renderTimeseries() {
+        if (!tsSvg || !tsChartWrap || !tsPlaceholder) return;
+        if (!selectedConceptId || !conceptTimeseries[selectedConceptId] || tokenList.length === 0) {
+          if (tsPlaceholder) tsPlaceholder.style.display = "block";
+          if (tsSvg) tsSvg.style.display = "none";
+          if (tsTokenAxis) { tsTokenAxis.style.display = "none"; tsTokenAxis.innerHTML = ""; }
+          if (tsTitle) tsTitle.textContent = "Concept timeseries";
+          return;
+        }
+        tsPlaceholder.style.display = "none";
+        tsSvg.style.display = "block";
+        if (tsTitle) tsTitle.textContent = selectedConceptLabel ? (selectedConceptLabel + " · timeseries") : "Concept timeseries";
+
+        var center = currentTokenIndex >= 0 ? currentTokenIndex : 0;
+        var startIdx = Math.max(0, center - TS_HALF);
+        var endIdx = Math.min(tokenList.length - 1, center + TS_HALF);
+        var data = conceptTimeseries[selectedConceptId];
+        var w = tsChartWrap.clientWidth || 200;
+        var h = TS_HEIGHT;
+        var plotW = w - TS_PAD.left - TS_PAD.right;
+        var plotH = h - TS_PAD.top - TS_PAD.bottom;
+
+        tsSvg.setAttribute("width", w);
+        tsSvg.setAttribute("height", h);
+        tsSvg.setAttribute("viewBox", "0 0 " + w + " " + h);
+        tsSvg.innerHTML = "";
+
+        var len = endIdx - startIdx + 1;
+        if (len < 2) return;
+
+        var xScale = function(i) { return TS_PAD.left + ((i - startIdx) / Math.max(1, len - 1)) * plotW; };
+        var yScale = function(v) { return TS_PAD.top + (1 - v) * plotH; };
+
+        var pathD = "";
+        for (var i = startIdx; i <= endIdx; i++) {
+          var x = xScale(i);
+          var y = yScale(data[i] || 0);
+          pathD += (i === startIdx ? "M " : "L ") + x + " " + y + " ";
+        }
+        var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", pathD.trim());
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "var(--accent)");
+        path.setAttribute("stroke-width", "1.5");
+        path.setAttribute("class", "brain-ts-line");
+        tsSvg.appendChild(path);
+
+        var centerX = xScale(center);
+        var line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", centerX);
+        line.setAttribute("y1", TS_PAD.top);
+        line.setAttribute("x2", centerX);
+        line.setAttribute("y2", h - TS_PAD.bottom);
+        line.setAttribute("stroke", "var(--text)");
+        line.setAttribute("stroke-width", "1");
+        line.setAttribute("stroke-opacity", "0.5");
+        line.setAttribute("class", "brain-ts-center");
+        tsSvg.appendChild(line);
+
+        var y0 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        y0.setAttribute("x", 4);
+        y0.setAttribute("y", TS_PAD.top + 4);
+        y0.setAttribute("font-size", "9");
+        y0.setAttribute("fill", "var(--muted)");
+        y0.textContent = "1";
+        tsSvg.appendChild(y0);
+        var y1 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        y1.setAttribute("x", 4);
+        y1.setAttribute("y", h - TS_PAD.bottom - 2);
+        y1.setAttribute("font-size", "9");
+        y1.setAttribute("fill", "var(--muted)");
+        y1.textContent = "0";
+        tsSvg.appendChild(y1);
+
+        renderTimeseriesTokenAxis();
+      }
+
+      function renderTimeseriesTokenAxis() {
+        if (!tsTokenAxis || !tsChartWrap || tokenList.length === 0) return;
+        if (!selectedConceptId || !conceptTimeseries[selectedConceptId]) {
+          tsTokenAxis.style.display = "none";
+          tsTokenAxis.innerHTML = "";
+          return;
+        }
+        tsTokenAxis.style.display = "block";
+        tsTokenAxis.innerHTML = "";
+        var center = currentTokenIndex >= 0 ? currentTokenIndex : 0;
+        var startIdx = Math.max(0, center - TS_HALF);
+        var endIdx = Math.min(tokenList.length - 1, center + TS_HALF);
+        var w = tsChartWrap.clientWidth || 200;
+        var plotW = w - TS_PAD.left - TS_PAD.right;
+        var len = endIdx - startIdx + 1;
+        var step = len > 20 ? Math.max(1, Math.floor(len / 15)) : 1;
+        for (var i = startIdx; i <= endIdx; i += step) {
+          var pct = len > 1 ? ((i - startIdx) / (len - 1)) * 100 : 50;
+          var leftPct = w > 0 ? ((TS_PAD.left + (pct / 100) * plotW) / w) * 100 : 0;
+          var span = document.createElement("span");
+          span.className = "brain-ts-token" + (i === center ? " brain-ts-token--current" : "");
+          span.style.left = leftPct + "%";
+          span.textContent = (tokenList[i] || "").length > 8 ? (tokenList[i] || "").slice(0, 7) + "…" : (tokenList[i] || "");
+          span.title = (tokenList[i] || "") + " (index " + i + ")";
+          span.dataset.index = String(i);
+          tsTokenAxis.appendChild(span);
+        }
+      }
+      if (tsTokenAxis) {
+        tsTokenAxis.addEventListener("click", function(e) {
+          var span = e.target.closest(".brain-ts-token");
+          if (!span || span.dataset.index == null) return;
+          stopSimulation();
+          setCurrentToken(parseInt(span.dataset.index, 10));
+        });
+      }
+
+      svg.addEventListener("click", function(e) {
+        var circle = e.target.closest("circle.brain-node");
+        if (!circle) return;
+        selectedConceptId = circle.getAttribute("data-id");
+        selectedConceptLabel = circle.getAttribute("data-label") || selectedConceptId;
+        var activeIds = (currentTokenIndex >= 0 && tokenActivations[currentTokenIndex]) ? tokenActivations[currentTokenIndex] : [];
+        renderNodes(activeIds);
+        renderTimeseries();
+        renderTimeseriesTokenAxis();
+      });
+
+      if (tsChartWrap && typeof ResizeObserver !== "undefined") {
+        var ro = new ResizeObserver(function() {
+          if (selectedConceptId) { renderTimeseries(); renderTimeseriesTokenAxis(); }
+        });
+        ro.observe(tsChartWrap);
+      }
+
+      window.PNP_brainVizSetTokens = function() {
+        var messages = window.PNP_conversationMessages || [];
+        tokenList = [];
+        messages.forEach(function(m) {
+          var parts = tokenizeText(m.content || "");
+          parts.forEach(function(t) { tokenList.push(t); });
+        });
+        if (nodes.length > 0) {
+          tokenActivations = buildTokenActivations(tokenList.length);
+          buildConceptTimeseries();
+        } else {
+          tokenActivations = tokenList.map(function() { return []; });
+          conceptTimeseries = {};
+        }
+        currentTokenIndex = -1;
+        stopSimulation();
+        renderTokenStrip();
+        renderTimeseries();
+        if (tokenList.length > 0 && window.PNP_brainVizSetActivated) {
+          window.PNP_brainVizSetActivated([]);
+        }
+      };
+
+      fetch("/api/brain-config")
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (loading) loading.style.display = "none";
+          nodes = Array.isArray(data.nodes) ? data.nodes : [];
+          if (nodes.length === 0) {
+            if (empty) { empty.style.display = "block"; }
+            return;
+          }
+          if (empty) empty.style.display = "none";
+          svg.setAttribute("viewBox", [viewMinX, viewMinY, viewW, viewH].join(" "));
+          mockActivation();
+          if (window.PNP_conversationMessages && window.PNP_conversationMessages.length > 0 && window.PNP_brainVizSetTokens) {
+            window.PNP_brainVizSetTokens();
+          }
+        })
+        .catch(function() {
+          if (loading) loading.style.display = "none";
+          if (empty) empty.style.display = "block";
+        });
+
+      if (window.PNP_appendConversationMessageGenerating) {
+        var orig = window.PNP_appendConversationMessageGenerating;
+        window.PNP_appendConversationMessageGenerating = function() {
+          orig();
+          if (window.PNP_brainVizMockActivation) window.PNP_brainVizMockActivation();
+        };
+      }
+      if (window.PNP_finishGeneratingMessage) {
+        var origFinish = window.PNP_finishGeneratingMessage;
+        window.PNP_finishGeneratingMessage = function(content, isError) {
+          origFinish(content, isError);
+          if (window.PNP_brainVizSetTokens) {
+            window.PNP_brainVizSetTokens();
+          }
+        };
+      }
+    })();
+  })();
+  </script>
+</body>
+</html>

@@ -88,7 +88,8 @@
         const tr = document.createElement("tr");
         tr.className = "data-vars-data-row data-vars-var-row";
         const memStr = formatVarMemoryMb(v.memory_ram_mb);
-        const varName = v.name || "";
+        const varId = v.id || "";
+        const varName = v.name || varId || "";
         tr.innerHTML =
           '<td class="data-vars-td-name" title="' +
           escapeHtml(varName) +
@@ -103,7 +104,7 @@
         btn.addEventListener("click", async () => {
           try {
             const r = await fetch(
-              "/api/data-vars/" + encodeURIComponent(varName),
+              "/api/data-vars/" + encodeURIComponent(varId || varName),
               { method: "DELETE" }
             );
             if (r.ok) {
@@ -156,4 +157,3 @@
     dataVarsDropdown.addEventListener("click", (e) => e.stopPropagation());
   }
 })();
-

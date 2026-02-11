@@ -28,7 +28,7 @@
   --load-model-button-hover: #1F242D;
 
   /* Accent */
-  --accent: #8C1D18;
+  --accent: #b74f00;
 
   /* Interaction */
   --hover: #E4E1DA;
@@ -43,9 +43,9 @@
 
 [data-theme="dark"] {
   /* Base */
-  --bg: #0B0D12;
-  --panel: #12151C;
-  --sidebar: #0E1118;
+  --bg: #0d1425;
+  --panel: #0e1628;
+  --sidebar: #000000;
 
   /* Text */
   --text: #F5F7FA;
@@ -70,8 +70,8 @@
   --load-model-button-hover: #343A55;
 
   /* Accent (limited use) */
-  --accent: #E2B8B5;
-  --accent-hover: #F0C9C6;
+  --accent: #06c300;
+  --accent-hover: #008f21;
 
   /* Interaction */
   --hover: #1A1E30;

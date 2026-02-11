@@ -2,41 +2,41 @@
 <aside class="sidebar">
   <div class="sidebar-section">
     <div class="create-task-wrap">
-      {% if is_index %}
-      <button type="button" class="btn-create-task" id="btn-create-task" title="Hover to choose XAI level">Create XAI</button>
-      <div class="create-task-dropdown" id="create-task-dropdown">
-        {% for level_num, items in (xai_level_grouped or {}).items() %}
-        <div class="create-task-level-group">
-          <div class="create-task-level-header">Level {{ level_num }}</div>
-          <div class="create-task-rows">
-            {% for level, name in items %}
-            <button type="button" class="create-task-option create-task-row" data-level="{{ level }}" data-name="{{ name }}">
-              <span class="create-task-num">{{ level }}</span>
-              <span class="create-task-desc">{{ name }}</span>
-            </button>
-            {% endfor %}
-          </div>
+      <input
+        type="text"
+        id="create-task-input"
+        class="sidebar-input"
+        placeholder="Search XAI level"
+        autocomplete="off"
+      />
+      <div class="sidebar-picker create-task-picker" id="create-task-picker" aria-hidden="true">
+        <div class="create-task-grid-header">
+          <span>LEVEL 0</span>
+          <span>LEVEL 1</span>
+          <span>LEVEL 2</span>
         </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <a href="/" class="btn-create-task" title="Start new session">Create TASK</a>
-      <div class="create-task-dropdown" id="create-task-dropdown">
-        {% for level_num, items in (xai_level_grouped or {}).items() %}
-        <div class="create-task-level-group">
-          <div class="create-task-level-header">Level {{ level_num }}</div>
-          <div class="create-task-rows">
-            {% for level, name in items %}
-            <a href="/?create={{ level }}" class="create-task-option create-task-row">
-              <span class="create-task-num">{{ level }}</span>
-              <span class="create-task-desc">{{ name }}</span>
-            </a>
-            {% endfor %}
+        <div class="create-task-grid" id="create-task-picker-list">
+          {% for level_num in [0, 1, 2] %}
+          <div class="create-task-column" data-group="{{ level_num }}">
+            <div class="create-task-column-list">
+              {% for level, name in (xai_level_grouped or {}).get(level_num, []) %}
+              <button
+                type="button"
+                class="sidebar-picker-item create-task-option"
+                data-level="{{ level }}"
+                data-name="{{ name }}"
+                data-group="{{ level_num }}"
+                {% if not is_index %}data-href="/?create={{ level }}"{% endif %}
+              >
+                <span class="sidebar-picker-name">{{ name }}</span>
+              </button>
+              {% endfor %}
+              <div class="create-task-empty">—</div>
+            </div>
           </div>
+          {% endfor %}
         </div>
-        {% endfor %}
       </div>
-      {% endif %}
     </div>
   </div>
 
@@ -59,21 +59,38 @@
       </div>
     </div>
     <div class="sidebar-model-controls">
-      <select id="sidebar-model" class="sidebar-select">
-        {% if models_grouped %}
-        {% for group, model_list in models_grouped.items() %}
-        <optgroup label="{{ group if group else 'Models' }}">
-          {% for m in model_list %}
-          <option value="{{ m }}" {% if task and task.model == m %}selected{% endif %}>{{ m }}</option>
+      <input
+        type="text"
+        id="sidebar-model"
+        class="sidebar-input"
+        placeholder="Enter model id"
+        value="{% if task and task.model %}{{ task.model }}{% endif %}"
+      />
+      <div class="sidebar-picker" id="model-picker" aria-hidden="true">
+        <div class="sidebar-picker-header">
+          <span>Model</span>
+          <span>Category</span>
+        </div>
+        <div class="sidebar-picker-list" id="model-picker-list">
+          {% if models_grouped %}
+          {% for group, model_list in models_grouped.items() %}
+            {% for m in model_list %}
+            <button type="button" class="sidebar-picker-item" data-value="{{ m }}" data-group="{{ group if group else 'Models' }}">
+              <span class="sidebar-picker-name">{{ m }}</span>
+              <span class="sidebar-picker-meta">{{ group if group else 'Models' }}</span>
+            </button>
+            {% endfor %}
           {% endfor %}
-        </optgroup>
-        {% endfor %}
-        {% else %}
-        {% for m in models %}
-        <option value="{{ m }}" {% if task and task.model == m %}selected{% endif %}>{{ m }}</option>
-        {% endfor %}
-        {% endif %}
-      </select>
+          {% else %}
+          {% for m in models %}
+            <button type="button" class="sidebar-picker-item" data-value="{{ m }}" data-group="Models">
+              <span class="sidebar-picker-name">{{ m }}</span>
+              <span class="sidebar-picker-meta">Models</span>
+            </button>
+          {% endfor %}
+          {% endif %}
+        </div>
+      </div>
       <button type="button" class="btn-load-model" id="btn-load-model">Load</button>
     </div>
     <div class="loaded-model-display {% if task and task.model %}has-model{% endif %}" id="loaded-model-display">
@@ -158,7 +175,17 @@
     <ul class="dataset-pipeline-list" id="dataset-pipeline-list">
       {% for p in (dataset_pipelines or []) %}
       <li class="dataset-pipeline-item {% if pipeline and p.id == pipeline.id %}active{% endif %}" data-pipeline-id="{{ p.id }}">
-        <a href="/data/{{ p.id }}" class="dataset-pipeline-link">{{ p.name }} --- {{ p.status }}</a>
+        <a href="/data/{{ p.id }}" class="dataset-pipeline-link">
+          <span class="dataset-pipeline-name">{{ p.name or '—' }}</span>
+          <span class="dataset-pipeline-sep">|</span>
+          <span class="dataset-pipeline-category">
+            {% if p.hf_dataset_path %}
+              {{ (dataset_categories or {}).get(p.hf_dataset_path, 'custom') }}
+            {% else %}
+              —
+            {% endif %}
+          </span>
+        </a>
         <button type="button" class="dataset-pipeline-delete" data-pipeline-id="{{ p.id }}" title="Delete">×</button>
       </li>
       {% else %}
@@ -180,6 +207,9 @@
     {% if is_index %}</div>{% endif %}
   </div>
 </aside>
+
+{# Variable manager panel: rendered next to sidebar inside main-layout #}
+{% include '_variable_panel.html' %}
 
 {# Treatment editor panel: rendered next to sidebar inside main-layout #}
 {% include '_treatment_panel.html' %}

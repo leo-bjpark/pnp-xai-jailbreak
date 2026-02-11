@@ -1,0 +1,40 @@
+<aside class="right-panel right-panel--sidebar" id="variable-panel" aria-label="Variable manager">
+  <div class="right-panel-header">
+    <span class="right-panel-title">Variable Manager</span>
+    <button type="button" class="right-panel-close" id="variable-panel-close" aria-label="Close">×</button>
+  </div>
+  <div class="right-panel-body">
+    <div class="variable-panel-empty" id="variable-panel-empty">Select a variable from the left sidebar.</div>
+    <div class="variable-panel-content" id="variable-panel-content" aria-hidden="true">
+      <div class="variable-panel-section">
+        <div class="variable-panel-title-row">
+          <div class="variable-panel-name" id="variable-panel-name">—</div>
+          <span class="variable-panel-type" id="variable-panel-type">—</span>
+        </div>
+        <dl class="variable-panel-meta" id="variable-panel-meta"></dl>
+      </div>
+
+      <div class="variable-panel-section">
+        <div class="variable-panel-row">
+          <div class="variable-panel-row-label">MEM Object</div>
+          <div class="variable-panel-row-value" id="variable-panel-cache-name">—</div>
+        </div>
+        <div class="variable-panel-actions">
+          <button type="button" class="btn-ghost" id="variable-panel-load">Load</button>
+          <button type="button" class="btn-ghost" id="variable-panel-unload" disabled>Unload</button>
+        </div>
+        <div class="variable-panel-rename">
+          <input type="text" class="sidebar-input" id="variable-panel-rename-input" placeholder="New variable name" />
+          <button type="button" class="btn-ghost" id="variable-panel-rename">Rename</button>
+        </div>
+        <div class="variable-panel-row">
+          <div class="variable-panel-row-label">HD Path</div>
+          <div class="variable-panel-row-value" id="variable-panel-hd-path">—</div>
+          <button type="button" class="btn-danger" id="variable-panel-delete">Delete</button>
+        </div>
+        <div class="variable-panel-status" id="variable-panel-status">—</div>
+      </div>
+
+    </div>
+  </div>
+</aside>

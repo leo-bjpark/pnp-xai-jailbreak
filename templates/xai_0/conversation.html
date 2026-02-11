@@ -113,18 +113,25 @@
   <script src="{{ url_for('static', filename='js/memory_panels.js') }}"></script>
   <script>window.PNP_CURRENT_TASK_ID = {{ task.id | tojson }}; window.PNP_CURRENT_TASK_LEVEL = {{ task.xai_level | tojson }};</script>
   <script>window.PNP_RESTORE_CONVERSATION = {% if task.result and task.result.get('conversation_list') %}{{ task.result.conversation_list | tojson | safe }}{% else %}null{% endif %};</script>
+  <script>window.PNP_RESTORE_CONVERSATION_HISTORY = {% if task.result and task.result.get('conversation_history') %}{{ task.result.conversation_history | tojson | safe }}{% else %}null{% endif %};</script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
   <script>
   (function() {
     var log = document.getElementById("conversation-log");
     var userInput = document.getElementById("conversation-user-input");
     window.PNP_conversationMessages = [];
+    window.PNP_conversationHistory = [];
 
     function escapeHtml(s) {
       if (s == null) return "";
       var div = document.createElement("div");
       div.textContent = s;
       return div.innerHTML;
+    }
+
+    function pushHistory(role, content) {
+      window.PNP_conversationHistory = window.PNP_conversationHistory || [];
+      window.PNP_conversationHistory.push({ role: role, content: content || "" });
     }
 
     window.PNP_appendConversationMessage = function(role, content, skipPush) {
@@ -135,7 +142,10 @@
         "<div class=\"conversation-bubble\">" + escapeHtml(content) + "</div>";
       log.appendChild(msg);
       log.scrollTop = log.scrollHeight;
-      if (!skipPush && role === "user") window.PNP_conversationMessages.push({ role: "user", content: content || "" });
+      if (!skipPush && role === "user") {
+        window.PNP_conversationMessages.push({ role: "user", content: content || "" });
+        pushHistory("user", content);
+      }
     };
 
     window.PNP_getConversationMessagesForRun = function(newUserContent) {
@@ -147,6 +157,7 @@
     window.PNP_appendAssistantMessage = function(content) {
       window.PNP_conversationMessages = window.PNP_conversationMessages || [];
       window.PNP_conversationMessages.push({ role: "assistant", content: content || "" });
+      pushHistory("assistant", content);
     };
 
     window.PNP_appendConversationMessageGenerating = function() {
@@ -223,16 +234,38 @@
     var wrap = document.getElementById("conversation-wrap");
     var cum = wrap && wrap.dataset.cumulativeGenerated ? parseInt(wrap.dataset.cumulativeGenerated, 10) : 0;
 
-    if (window.PNP_RESTORE_CONVERSATION && window.PNP_RESTORE_CONVERSATION.messages && Array.isArray(window.PNP_RESTORE_CONVERSATION.messages)) {
+    if (window.PNP_RESTORE_CONVERSATION_HISTORY && Array.isArray(window.PNP_RESTORE_CONVERSATION_HISTORY)) {
+      var historyList = window.PNP_RESTORE_CONVERSATION_HISTORY;
+      window.PNP_conversationHistory = historyList.map(function(m) {
+        return { role: m.role, content: m.content || "" };
+      });
+      window.PNP_conversationMessages = window.PNP_conversationHistory.slice();
+      for (var i = 0; i < historyList.length; i++) {
+        var hm = historyList[i];
+        window.PNP_appendConversationMessage(hm.role, hm.content || "", true);
+      }
+    } else if (window.PNP_RESTORE_CONVERSATION && window.PNP_RESTORE_CONVERSATION.messages && Array.isArray(window.PNP_RESTORE_CONVERSATION.messages)) {
       var list = window.PNP_RESTORE_CONVERSATION.messages;
-      window.PNP_conversationMessages = list.map(function(m) {
+      window.PNP_conversationHistory = list.map(function(m) {
         return { role: (m.role === "ai" || m.role === "assistant") ? "assistant" : "user", content: m.content || "" };
       });
-      for (var i = 0; i < list.length; i++) {
-        var m = list[i];
+      window.PNP_conversationMessages = window.PNP_conversationHistory.slice();
+      for (var j = 0; j < list.length; j++) {
+        var m = list[j];
         var role = (m.role === "ai" || m.role === "assistant") ? "assistant" : "user";
         window.PNP_appendConversationMessage(role, m.content || "", true);
       }
+    }
+
+    if (window.PNP_getChatClosedFlag && window.PNP_getChatClosedFlag(window.PNP_CURRENT_TASK_ID)) {
+      window.PNP_conversationMessages = [];
+      window.PNP_conversationHistory = window.PNP_conversationHistory || [];
+      if (window.PNP_updateConversationCacheCount) window.PNP_updateConversationCacheCount(0);
+      if (window.PNP_updateConversationTokenCount) window.PNP_updateConversationTokenCount(null, null, 0);
+      var wrapEl = document.getElementById("conversation-token-count-wrap");
+      if (wrapEl) wrapEl.classList.remove("visible");
+      var wrap = document.getElementById("conversation-wrap");
+      if (wrap) wrap.dataset.cumulativeGenerated = "0";
     }
 
     if (window.PNP_updateConversationTokenCount && cum > 0) {

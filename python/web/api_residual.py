@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify
 
-from python.memory.variable import get_residual_variable, save_residual_variable
+from python.memory.variable import get_residual_variable, load_variable_pickle, save_residual_variable, save_variable_pickle, has_variable_pickle
 
 
 residual_bp = Blueprint("residual", __name__)
@@ -9,10 +9,14 @@ residual_bp = Blueprint("residual", __name__)
 # This blueprint is kept for future residual/XAI-2-only HTTP endpoints.
 
 
-@residual_bp.get("/api/residual-vars/<path:var_name>")
-def api_get_residual_var(var_name: str):
-    """Get residual variable by name (directions dict)."""
-    rv = get_residual_variable(var_name)
+@residual_bp.get("/api/residual-vars/<path:var_id>")
+def api_get_residual_var(var_id: str):
+    """Get residual variable by id (directions dict)."""
+    if has_variable_pickle(var_id):
+        payload = load_variable_pickle(var_id)
+        if isinstance(payload, dict) and payload.get("directions"):
+            return jsonify(payload)
+    rv = get_residual_variable(var_id)
     if not rv:
         return jsonify({"error": "Variable not found"}), 404
     return jsonify(rv)
@@ -41,7 +45,7 @@ def api_save_residual_var():
         model_dim = len(first) if isinstance(first, (list, tuple)) else 0
     additional_naming = (data.get("additional_naming") or "").strip() or None
     try:
-        var_name = save_residual_variable(
+        var_id, var_name = save_residual_variable(
             directions=directions,
             task_name=task_name,
             model=model,
@@ -51,5 +55,12 @@ def api_save_residual_var():
         )
     except (ValueError, TypeError) as exc:
         return jsonify({"error": str(exc)}), 400
-    return jsonify({"status": "ok", "variable_name": var_name})
-
+    payload = {
+        "directions": directions,
+        "task_name": task_name,
+        "model": model,
+        "num_keys": int(num_keys),
+        "model_dim": int(model_dim or 0),
+    }
+    pickle_saved = save_variable_pickle(var_id, payload)
+    return jsonify({"status": "ok", "variable_id": var_id, "variable_name": var_name, "pickle_saved": pickle_saved})

@@ -2,7 +2,6 @@ from flask import Blueprint, jsonify, request
 
 from python.memory import cache_store
 from python.model_load import (
-    clear_model_cache,
     get_config_models,
     get_config_models_grouped,
     get_model_status,
@@ -32,6 +31,20 @@ def api_set_session():
     model = data.get("loaded_model")
     treatment = data.get("treatment", "")
     cache_store.set_session(model, treatment)
+    if model:
+        try:
+            from python.treatments.simple_steering import apply_simple_steering_from_string
+
+            apply_simple_steering_from_string(model, treatment)
+        except Exception:
+            pass
+    return jsonify({"status": "ok"})
+
+
+@session_bp.post("/api/session/leave")
+def api_session_leave():
+    """Leave current task: clear only task-associated caches (session namespace). Keeps loaded_model and treatment."""
+    cache_store.clear_namespace("session")
     return jsonify({"status": "ok"})
 
 
@@ -97,4 +110,3 @@ def api_set_cuda_env():
     value = str(value).strip()
     os.environ["CUDA_VISIBLE_DEVICES"] = value
     return jsonify({"CUDA_VISIBLE_DEVICES": value, "echo": value})
-

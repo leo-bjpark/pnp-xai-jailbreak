@@ -69,6 +69,7 @@
   let modelSpecHideTimeout = null;
   let modelSpecCache = {}; // modelKey -> status
   let cudaPanelHideTimeout = null;
+  let treatmentSyncTimer = null;
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -76,7 +77,9 @@
   const el = {
     btnCreateTask: $("#btn-create-task"),
     createTaskWrap: document.querySelector(".create-task-wrap"),
-    createTaskDropdown: $("#create-task-dropdown"),
+    createTaskInput: $("#create-task-input"),
+    createTaskPicker: $("#create-task-picker"),
+    createTaskPickerList: $("#create-task-picker-list"),
     loadedModelDisplay: $("#loaded-model-display"),
     loadedModelText: $("#loaded-model-text"),
     taskPanelList: $("#task-panel-list"),
@@ -110,6 +113,36 @@
     btnCudaExport: $("#btn-cuda-export"),
     cudaSettingEchoValue: $("#cuda-setting-echo-value"),
   };
+
+  // ----- App log -----
+  const appLogList = document.getElementById("app-log-list");
+  const appLogPreview = document.getElementById("app-log-preview");
+  const appLogPanel = document.getElementById("app-log-panel");
+  let logPulseTimer = null;
+  function appendAppLog(message, type = "") {
+    if (!appLogList) return;
+    const item = document.createElement("div");
+    item.className = "app-log-item" + (type ? " is-" + type : "");
+    const stamp = new Date().toLocaleTimeString();
+    const text = `[${stamp}] ${message}`;
+    item.textContent = text;
+    appLogList.prepend(item);
+    if (appLogPreview) appLogPreview.textContent = text;
+    if (appLogPanel) {
+      appLogPanel.classList.remove("is-updated");
+      void appLogPanel.offsetWidth;
+      appLogPanel.classList.add("is-updated");
+      if (logPulseTimer) clearTimeout(logPulseTimer);
+      logPulseTimer = setTimeout(() => {
+        appLogPanel.classList.remove("is-updated");
+      }, 1200);
+    }
+    const items = appLogList.querySelectorAll(".app-log-item");
+    if (items.length > 50) {
+      for (let i = items.length - 1; i >= 50; i--) items[i].remove();
+    }
+  }
+  window.PNP_appendAppLog = appendAppLog;
 
   // Debug: Treatment / Steering DOM 상태 확인
   console.log("[treatment:init]", {
@@ -146,17 +179,16 @@
   function updateInputSettingTriggerText() {
     const trigger = el.inputSettingTrigger;
     if (!trigger) return;
-    const taskType = trigger.dataset.taskType || "—";
-    const userName = trigger.dataset.taskName != null && trigger.dataset.taskName !== "" ? trigger.dataset.taskName : "—";
-    const onTaskPage = !!window.PNP_CURRENT_TASK_ID;
-    const hasTaskModel = onTaskPage && trigger.dataset.taskModel != null && trigger.dataset.taskModel !== "";
-    const model = hasTaskModel
-      ? trigger.dataset.taskModel
-      : (onTaskPage ? "None" : ((el.sidebarModel?.value || "").trim() || "—"));
-    const treatment = (onTaskPage && trigger.dataset.taskTreatment != null)
-      ? (trigger.dataset.taskTreatment || "None")
-      : (onTaskPage ? "None" : ((el.sidebarTreatment?.value || "").trim() || "None"));
-    trigger.textContent = `${taskType}  |  ${model}  |  ${treatment}  |  ${userName}`;
+    const hintEl = document.querySelector("#input-setting-body .input-setting-hint");
+    const rawHint = hintEl ? (hintEl.textContent || "").trim() : "";
+    let firstLine = rawHint;
+    if (rawHint.includes("\n")) {
+      firstLine = rawHint.split("\n")[0].trim();
+    } else if (rawHint.includes(". ")) {
+      firstLine = rawHint.split(". ")[0].trim() + ".";
+    }
+    if (!firstLine) firstLine = trigger.dataset.taskType || "Input settings";
+    trigger.textContent = firstLine;
   }
 
   function updateTreatmentStatusUI() {
@@ -193,18 +225,40 @@
     updateLoadButtonState();
     updateInputSettingTriggerText();
   });
+  function scheduleTreatmentSync() {
+    if (treatmentSyncTimer) clearTimeout(treatmentSyncTimer);
+    treatmentSyncTimer = setTimeout(async () => {
+      try {
+        const treatment = (el.sidebarTreatment?.value || "").trim();
+        session = {
+          loaded_model: session.loaded_model || null,
+          treatment,
+        };
+        await API.setSession({
+          loaded_model: session.loaded_model,
+          treatment,
+        });
+        appendAppLog(treatment ? "Steering updated" : "Steering cleared");
+      } catch (e) {
+        appendAppLog("Steering update failed", "error");
+      }
+    }, 250);
+  }
   el.sidebarTreatment?.addEventListener("input", () => {
     updateInputSettingTriggerText();
     updateTreatmentStatusUI();
+    scheduleTreatmentSync();
   });
   el.sidebarTreatment?.addEventListener("change", () => {
     updateInputSettingTriggerText();
     updateTreatmentStatusUI();
+    scheduleTreatmentSync();
   });
 
   // ----- Treatments: Simple Steering (Residual) -----
   let treatmentSelectedKeys = new Set();
   let treatmentDragState = null; // { startRow, startCol, isSelecting }
+  let residualNameToId = new Map();
 
   async function refreshResidualVarOptions() {
     if (!el.treatmentResidualVar) return;
@@ -215,15 +269,20 @@
       const residuals = vars.filter((v) => v.type === "residual");
       const select = el.treatmentResidualVar;
       const current = select.value;
+      residualNameToId = new Map();
       select.innerHTML = '<option value="">— Select saved residual —</option>';
       residuals.forEach((v) => {
         const opt = document.createElement("option");
-        opt.value = v.name;
-        opt.textContent = v.name;
+        opt.value = v.id || "";
+        opt.textContent = v.name || v.id || "";
+        if (v.name && v.id) residualNameToId.set(v.name, v.id);
         select.appendChild(opt);
       });
-      if (current && residuals.some((v) => v.name === current)) {
-        select.value = current;
+      if (current) {
+        const existsById = residuals.some((v) => v.id === current);
+        const mapped = residualNameToId.get(current);
+        if (existsById) select.value = current;
+        else if (mapped) select.value = mapped;
       }
     } catch {
       // ignore
@@ -346,7 +405,9 @@
       return;
     }
     if (el.treatmentResidualVar && cfg.residual_var) {
-      el.treatmentResidualVar.value = String(cfg.residual_var);
+      const raw = String(cfg.residual_var);
+      const mapped = residualNameToId.get(raw);
+      el.treatmentResidualVar.value = mapped || raw;
     }
     if (el.treatmentAlpha && cfg.alpha != null) {
       el.treatmentAlpha.value = String(cfg.alpha);
@@ -489,6 +550,7 @@
     el.sidebarTreatment.value = JSON.stringify(cfg);
     updateInputSettingTriggerText();
     updateTreatmentStatusUI();
+    appendAppLog("Steering applied");
     // 세션에도 즉시 반영하여 새로고침 후에도 유지되도록 한다.
     try {
       session = {
@@ -526,6 +588,19 @@
     if (el.treatmentNormalize) el.treatmentNormalize.checked = true;
     updateInputSettingTriggerText();
     updateTreatmentStatusUI();
+    appendAppLog("Steering cleared");
+    try {
+      session = {
+        loaded_model: session.loaded_model || null,
+        treatment: "",
+      };
+      API.setSession({
+        loaded_model: session.loaded_model,
+        treatment: "",
+      }).catch(() => {});
+    } catch {
+      // ignore
+    }
   });
 
   // Open Treatment panel (Simple Steering) attached to sidebar
@@ -574,9 +649,11 @@
       session = { loaded_model: model, treatment };
       updateSessionUI();
       if (typeof window.refreshMemorySummary === "function") window.refreshMemorySummary();
+      appendAppLog("Model loaded: " + model);
     } catch (err) {
       alert("Model load failed: " + err.message);
       updateLoadButtonState();
+      appendAppLog("Model load failed: " + (err.message || "error"), "error");
     } finally {
       loadInProgress = false;
       updateLoadButtonState();
@@ -849,26 +926,83 @@
     }
   }
 
-  // Create XAI: click main button to toggle dropdown (hover also works)
-  el.btnCreateTask?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    el.createTaskWrap?.classList.toggle("dropdown-open");
-  });
+  function toggleCreateTaskPicker(show) {
+    if (!el.createTaskPicker) return;
+    el.createTaskPicker.classList.toggle("visible", !!show);
+    el.createTaskPicker.setAttribute("aria-hidden", show ? "false" : "true");
+    if (show) {
+      positionCreateTaskPicker();
+    }
+  }
 
-  // Close dropdown when clicking outside
-  document.addEventListener("click", (e) => {
-    if (e.target.closest(".create-task-wrap")) return;
-    el.createTaskWrap?.classList.remove("dropdown-open");
-  });
+  function positionCreateTaskPicker() {
+    if (!el.createTaskPicker || !el.createTaskInput) return;
+    const rect = el.createTaskInput.getBoundingClientRect();
+    const minWidth = 520;
+    const desiredWidth = Math.max(rect.width, minWidth);
+    const maxLeft = window.innerWidth - desiredWidth - 12;
+    const left = Math.max(12, Math.min(rect.left, maxLeft));
+    const top = rect.bottom + 6;
+    el.createTaskPicker.classList.add("is-floating");
+    el.createTaskPicker.style.left = `${left}px`;
+    el.createTaskPicker.style.top = `${top}px`;
+    el.createTaskPicker.style.width = `${desiredWidth}px`;
+  }
 
-  $$(".create-task-option").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      el.createTaskWrap?.classList.remove("dropdown-open");
+  function filterCreateTaskPicker(query) {
+    if (!el.createTaskPickerList) return;
+    const q = (query || "").toLowerCase().trim();
+    el.createTaskPickerList.querySelectorAll(".create-task-option").forEach((elItem) => {
+      const name = (elItem.dataset.name || "").toLowerCase();
+      const level = (elItem.dataset.level || "").toLowerCase();
+      const group = (elItem.dataset.group || "").toLowerCase();
+      const match = !q || name.includes(q) || level.includes(q) || group.includes(q);
+      elItem.style.display = match ? "" : "none";
+    });
+    el.createTaskPickerList.querySelectorAll(".create-task-column").forEach((col) => {
+      const visible = col.querySelector(".create-task-option:not([style*=\"display: none\"])");
+      const empty = col.querySelector(".create-task-empty");
+      if (empty) empty.style.display = visible ? "none" : "block";
+    });
+  }
+
+  if (el.createTaskInput) {
+    el.createTaskInput.addEventListener("focus", () => {
+      toggleCreateTaskPicker(true);
+      filterCreateTaskPicker(el.createTaskInput.value);
+    });
+    el.createTaskInput.addEventListener("input", () => {
+      toggleCreateTaskPicker(true);
+      filterCreateTaskPicker(el.createTaskInput.value);
+    });
+    window.addEventListener("resize", () => {
+      if (el.createTaskPicker && el.createTaskPicker.classList.contains("visible")) {
+        positionCreateTaskPicker();
+      }
+    });
+  }
+
+  if (el.createTaskPickerList) {
+    el.createTaskPickerList.addEventListener("click", (e) => {
+      const btn = e.target.closest(".create-task-option");
+      if (!btn) return;
+      e.preventDefault();
       const level = btn.dataset.level;
       const name = btn.dataset.name || "";
+      const href = btn.dataset.href || "";
+      if (el.createTaskInput) el.createTaskInput.value = name || level || "";
+      toggleCreateTaskPicker(false);
+      if (href) {
+        window.location.href = href;
+        return;
+      }
       if (level) showCreateTaskModal(level, name);
     });
+  }
+
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".create-task-wrap")) return;
+    toggleCreateTaskPicker(false);
   });
 
   createTaskCancel?.addEventListener("click", hideCreateTaskModal);
@@ -894,7 +1028,84 @@
   }
 
   // ----- Run with session check -----
+  async function ensureVariableLoaded(varName) {
+    const varId = (varName || "").trim();
+    if (!varId) return true;
+    try {
+      const res = await fetch("/api/data-vars/" + encodeURIComponent(varId) + "/detail");
+      const data = await res.json().catch(() => ({}));
+      const displayName = data.name || varId;
+      if (!res.ok || data.error) {
+        alert("Variable not found: " + displayName);
+        return false;
+      }
+      if (data.is_loaded) return true;
+      const ok = confirm('Variable "' + displayName + '" is not loaded in RAM. Load now?');
+      if (!ok) return false;
+      const loadRes = await fetch("/api/data-vars/" + encodeURIComponent(varId) + "/load", { method: "POST" });
+      const loadData = await loadRes.json().catch(() => ({}));
+      if (!loadRes.ok || loadData.error) {
+        alert("Failed to load variable: " + (loadData.error || "Unknown error"));
+        return false;
+      }
+      if (typeof window.refreshSidebarVariableList === "function") window.refreshSidebarVariableList();
+      return true;
+    } catch (e) {
+      alert("Failed to check variable status.");
+      return false;
+    }
+  }
+  window.PNP_ensureVariableLoaded = ensureVariableLoaded;
+
+  function chatClosedKey(taskId) {
+    return "pnp_chat_closed_" + String(taskId || "unknown");
+  }
+  function setChatClosedFlag(taskId) {
+    try {
+      localStorage.setItem(chatClosedKey(taskId), "1");
+    } catch (_) {}
+  }
+  function clearChatClosedFlag(taskId) {
+    try {
+      localStorage.removeItem(chatClosedKey(taskId));
+    } catch (_) {}
+  }
+  function getChatClosedFlag(taskId) {
+    try {
+      return localStorage.getItem(chatClosedKey(taskId)) === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+  window.PNP_getChatClosedFlag = getChatClosedFlag;
+  window.PNP_clearChatClosedFlag = clearChatClosedFlag;
+  function appendConversationDivider(label) {
+    const log = document.getElementById("conversation-log");
+    if (!log) return;
+    if (log.querySelector(".conversation-divider[data-chat-closed=\"true\"]")) return;
+    const divider = document.createElement("div");
+    divider.className = "conversation-divider";
+    divider.dataset.chatClosed = "true";
+    divider.textContent = label || "Previous conversation (read-only)";
+    log.appendChild(divider);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function maybeAppendChatClosed() {
+    if (!(window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0")) return;
+    const taskId = window.PNP_CURRENT_TASK_ID || "";
+    if (!getChatClosedFlag(taskId)) return;
+    appendConversationDivider("Previous conversation (read-only)");
+  }
+
   async function doRun(forceLoadModel = false) {
+    if (el.btnRun && el.btnRun.classList.contains("is-running")) {
+      if (typeof window.PNP_showStatusToast === "function") {
+        window.PNP_showStatusToast("Wait for the current response to finish.", "error");
+      }
+      return;
+    }
+    appendAppLog("RUN started");
     const model = el.sidebarModel.value;
     const treatment = el.sidebarTreatment.value.trim() || "";
     const inputSetting = { ...gatherTaskInput(), model, treatment };
@@ -920,13 +1131,23 @@
       if (layerCfg) Object.assign(inputSetting, layerCfg);
     }
 
-    if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2") {
-      const contentEl = document.getElementById("conversation-user-input");
-      const content = (contentEl && contentEl.value ? contentEl.value : "").trim();
-      if (!content) {
+    let conversationUserContent = "";
+    if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
+      if (typeof window.PNP_getConversationUserInput === "function") {
+        conversationUserContent = window.PNP_getConversationUserInput();
+      } else {
+        const contentEl = document.getElementById("conversation-user-input");
+        conversationUserContent = contentEl && contentEl.value ? contentEl.value : "";
+      }
+      conversationUserContent = String(conversationUserContent || "").trim();
+      if (!conversationUserContent) {
         alert("메시지를 입력하세요.");
         return;
       }
+    }
+
+    if (!(await ensureVariableLoaded(inputSetting.variable_name))) {
+      return;
     }
 
     if (forceLoadModel) {
@@ -949,9 +1170,8 @@
       generationStatus.classList.add("visible");
     }
     try {
-      if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2") {
-        const contentEl = document.getElementById("conversation-user-input");
-        const userContent = (contentEl && contentEl.value ? contentEl.value : "").trim();
+      if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
+        const userContent = conversationUserContent;
         if (userContent && window.PNP_appendConversationMessage && window.PNP_appendConversationMessageGenerating) {
           window.PNP_appendConversationMessage("user", userContent);
           window.PNP_appendConversationMessageGenerating();
@@ -1057,6 +1277,7 @@
 
       if (res.error) {
         if (window.PNP_finishGeneratingMessage) window.PNP_finishGeneratingMessage(res.error, true);
+        appendAppLog("RUN failed: " + res.error, "error");
         alert(res.error);
         return;
       }
@@ -1106,6 +1327,7 @@
         }
         const jsonEl = document.getElementById("conversation-result-json");
         if (jsonEl) jsonEl.textContent = JSON.stringify(resultToShow, null, 2);
+        appendAppLog("RUN completed (conversation)");
         return;
       }
 
@@ -1168,8 +1390,15 @@
 
       if (taskId) {
         const resultToSave = { ...res };
+        if (isConversationResult && window.PNP_conversationHistory) {
+          resultToSave.conversation_history = window.PNP_conversationHistory;
+        }
         if (isResidualConceptResult && inputSetting) {
-          resultToSave.variable_name = inputSetting.variable_name;
+          const varSelect = document.getElementById("input-variable-name");
+          const selected = varSelect && varSelect.selectedOptions ? varSelect.selectedOptions[0] : null;
+          const nickname = selected ? (selected.dataset.nickname || selected.textContent || "").trim() : "";
+          resultToSave.variable_id = inputSetting.variable_name;
+          resultToSave.variable_name = nickname || inputSetting.variable_name;
           resultToSave.text_key = inputSetting.text_key;
           resultToSave.label_key = inputSetting.label_key;
           resultToSave.positive_label = inputSetting.positive_label;
@@ -1200,6 +1429,9 @@
       } else {
         const title = prompt("Enter task title (will be saved):", "Task " + new Date().toLocaleString());
         if (title) {
+          if (isConversationResult && window.PNP_conversationHistory) {
+            res.conversation_history = window.PNP_conversationHistory;
+          }
           await API.createTask({
             xai_level: currentTaskLevel,
             title,
@@ -1211,12 +1443,15 @@
           renderTaskList(data.tasks || data, data.xai_level_names || {});
         }
       }
+      appendAppLog("RUN completed");
     } catch (err) {
       if (err.name === "AbortError") {
         if (window.PNP_finishGeneratingMessage) window.PNP_finishGeneratingMessage("Cancelled.", true);
+        appendAppLog("RUN cancelled", "error");
         return;
       }
       if (window.PNP_finishGeneratingMessage) window.PNP_finishGeneratingMessage("Error: " + (err.message || String(err)), true);
+      appendAppLog("RUN error: " + (err.message || String(err)), "error");
       alert(err.message || String(err));
     } finally {
       runAbortController = null;
@@ -1238,7 +1473,7 @@
       const key = el.dataset.taskInput || el.name || el.id;
       if (key) obj[key] = el.value !== undefined ? el.value : el.textContent;
     });
-    if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2") {
+    if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
       const contentEl = document.getElementById("conversation-user-input");
       const systemEl = document.getElementById("input-system-instruction");
       const content = (contentEl && contentEl.value ? contentEl.value : "").trim();
@@ -1264,6 +1499,12 @@
   if (el.btnRun) {
     el.btnRun.addEventListener("click", () => {
       if (el.btnRun.classList.contains("is-running")) {
+        if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
+          if (typeof window.PNP_showStatusToast === "function") {
+            window.PNP_showStatusToast("Wait for the current response to finish.", "error");
+          }
+          return;
+        }
         if (!confirm("Generation을 중단하시겠습니까?")) return;
         if (runAbortController) runAbortController.abort();
         return;
@@ -1277,9 +1518,7 @@
     conversationInput.addEventListener("keydown", function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        if (el.btnRun && !el.btnRun.classList.contains("is-running")) {
-          doRun(false);
-        }
+        if (el.btnRun && !el.btnRun.classList.contains("is-running")) doRun(false);
       }
     });
   }
@@ -1623,9 +1862,19 @@
       e.preventDefault();
       const href = link.getAttribute("href");
       if (href && href.startsWith("/task/")) {
+        const taskIdFromHref = (href.match(/^\/task\/(.+)$/) || [])[1];
+        const isSwitchingTask = taskIdFromHref && String(window.PNP_CURRENT_TASK_ID || "") !== String(taskIdFromHref);
         if (taskLinkNavigateTimeout) clearTimeout(taskLinkNavigateTimeout);
         taskLinkNavigateTimeout = setTimeout(() => {
           taskLinkNavigateTimeout = null;
+          if (isSwitchingTask) {
+            if (window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "2.1.0") {
+              appendConversationDivider("Previous conversation (read-only)");
+              setChatClosedFlag(window.PNP_CURRENT_TASK_ID || "");
+              fetch("/api/transformer_cache/clear", { method: "POST", keepalive: true }).catch(() => {});
+            }
+            fetch("/api/session/leave", { method: "POST", keepalive: true }).catch(() => {});
+          }
           window.location.href = href;
         }, 250);
       }
@@ -1669,7 +1918,175 @@
     return div.innerHTML;
   }
 
-  // ----- Sidebar: Variable Cache list -----
+  // ----- Global status toast -----
+  let toastTimer = null;
+  function showStatusToast(message, type = "error") {
+    const toast = document.getElementById("status-toast");
+    if (!toast) return;
+    toast.textContent = message || "";
+    toast.classList.remove("error", "success");
+    if (type) toast.classList.add(type);
+    toast.classList.add("visible");
+    toast.setAttribute("aria-hidden", "false");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toast.classList.remove("visible");
+      toast.setAttribute("aria-hidden", "true");
+    }, 5000);
+  }
+  window.PNP_showStatusToast = showStatusToast;
+
+  // ----- Variable panel (right) -----
+  const variablePanel = document.getElementById("variable-panel");
+  const variablePanelClose = document.getElementById("variable-panel-close");
+  const variablePanelEmpty = document.getElementById("variable-panel-empty");
+  const variablePanelContent = document.getElementById("variable-panel-content");
+  const variablePanelName = document.getElementById("variable-panel-name");
+  const variablePanelType = document.getElementById("variable-panel-type");
+  const variablePanelMeta = document.getElementById("variable-panel-meta");
+  const variablePanelStatus = document.getElementById("variable-panel-status");
+  const variablePanelLoad = document.getElementById("variable-panel-load");
+  const variablePanelUnload = document.getElementById("variable-panel-unload");
+  const variablePanelDelete = document.getElementById("variable-panel-delete");
+  const variablePanelRenameInput = document.getElementById("variable-panel-rename-input");
+  const variablePanelRename = document.getElementById("variable-panel-rename");
+  const variablePanelCacheName = document.getElementById("variable-panel-cache-name");
+  const variablePanelHdPath = document.getElementById("variable-panel-hd-path");
+  const modelPicker = document.getElementById("model-picker");
+  const modelPickerList = document.getElementById("model-picker-list");
+
+  let activeVariableId = null;
+  let activeVariableName = null;
+
+  function setVariablePanelVisible(visible) {
+    if (!variablePanel) return;
+    variablePanel.classList.toggle("visible", !!visible);
+  }
+
+  function setVariablePanelStatus(msg) {
+    if (variablePanelStatus) variablePanelStatus.textContent = msg || "—";
+  }
+
+  function setVariablePanelEmpty() {
+    if (variablePanelEmpty) variablePanelEmpty.style.display = "block";
+    if (variablePanelContent) {
+      variablePanelContent.setAttribute("aria-hidden", "true");
+    }
+    if (variablePanelName) variablePanelName.textContent = "—";
+    if (variablePanelType) variablePanelType.textContent = "—";
+    if (variablePanelMeta) variablePanelMeta.innerHTML = "";
+    if (variablePanelCacheName) variablePanelCacheName.textContent = "—";
+    if (variablePanelHdPath) variablePanelHdPath.textContent = "—";
+    setVariablePanelStatus("—");
+  }
+
+  function formatRowSummary(info) {
+    if (!info || !info.num_rows) return "—";
+    return Object.entries(info.num_rows)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ");
+  }
+
+  function renderVariableDetail(detail) {
+    if (!detail) return;
+    if (variablePanelEmpty) variablePanelEmpty.style.display = "none";
+    if (variablePanelContent) variablePanelContent.setAttribute("aria-hidden", "false");
+
+    if (variablePanelName) variablePanelName.textContent = detail.name || "—";
+    if (variablePanelType) variablePanelType.textContent = (detail.type || "data").toUpperCase();
+
+    if (variablePanelMeta) {
+      const rows = [];
+      const addRow = (label, value) => {
+        if (value == null || value === "") return;
+        rows.push(`<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`);
+      };
+      addRow("Created", detail.created_at || "—");
+      addRow("Task", detail.task_name || "—");
+      addRow("Pipeline", detail.pipeline_id || "—");
+      if ((detail.type || "").toLowerCase() === "residual") {
+        addRow("Model", detail.model || "—");
+      } else {
+        addRow("Data", detail.data_name || "—");
+      }
+      addRow("Split", detail.split || "—");
+      if (detail.random_n != null) addRow("Random N", detail.random_n);
+      if (detail.seed != null) addRow("Seed", detail.seed);
+      if (detail.num_keys != null) addRow("Keys", detail.num_keys);
+      if (detail.model_dim != null) addRow("Dim", detail.model_dim);
+      if (detail.memory_ram_mb != null) addRow("Memory", `~${detail.memory_ram_mb} MB`);
+      if (detail.dataset_info) addRow("Rows", formatRowSummary(detail.dataset_info));
+      if (detail.processed_dataset_info) addRow("Processed", formatRowSummary(detail.processed_dataset_info));
+      addRow("Loaded", detail.is_loaded ? "Yes" : "No");
+      variablePanelMeta.innerHTML = rows.join("");
+    }
+
+    if (variablePanelCacheName) variablePanelCacheName.textContent = detail.cache_object_name || "—";
+    if (variablePanelHdPath) variablePanelHdPath.textContent = detail.hd_path || "—";
+
+    if (variablePanelLoad) variablePanelLoad.disabled = !!detail.is_loaded;
+    if (variablePanelUnload) variablePanelUnload.disabled = !detail.is_loaded;
+  }
+
+  function highlightSelectedVariable(varId) {
+    document.querySelectorAll(".sidebar-variable-item").forEach((el) => {
+      const isSelected = el.dataset && el.dataset.varId === varId;
+      el.classList.toggle("selected", !!isSelected);
+    });
+  }
+
+  async function refreshVariableDetail() {
+    if (!activeVariableId) return;
+    try {
+      const res = await fetch(
+        "/api/data-vars/" + encodeURIComponent(activeVariableId) + "/detail"
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setVariablePanelStatus("Variable not found.");
+        return;
+      }
+      renderVariableDetail(data);
+    } catch (e) {
+      setVariablePanelStatus("Failed to load variable detail.");
+    }
+  }
+
+  if (variablePanel) setVariablePanelEmpty();
+
+  function toggleModelPicker(show) {
+    if (!modelPicker) return;
+    modelPicker.classList.toggle("visible", !!show);
+    modelPicker.setAttribute("aria-hidden", show ? "false" : "true");
+  }
+
+  function filterModelPicker(query) {
+    if (!modelPickerList) return;
+    const q = (query || "").toLowerCase().trim();
+    modelPickerList.querySelectorAll(".sidebar-picker-item").forEach((el) => {
+      const name = (el.dataset.value || "").toLowerCase();
+      const group = (el.dataset.group || "").toLowerCase();
+      const match = !q || name.includes(q) || group.includes(q);
+      el.style.display = match ? "" : "none";
+    });
+  }
+
+  // ----- Sidebar: Variable Cache list (type: Dataset / Tensor, icon + tooltip) -----
+  function variableTypeInfo(type) {
+    const t = (type || "data").toLowerCase();
+    if (t === "residual") {
+      return { icon: "↗️", label: "Tensor", hint: "Residual direction vectors (layer × dim)." };
+    }
+    return { icon: "📦", label: "Dataset", hint: "Processed data from dataset pipeline." };
+  }
+  function variableStatusInfo(v) {
+    const hasRam = !!v.has_ram;
+    const hasDisk = !!v.has_disk;
+    if (hasRam && hasDisk) return { cls: "green", label: "RAM + Disk" };
+    if (hasRam && !hasDisk) return { cls: "blue", label: "RAM only" };
+    if (!hasRam && hasDisk) return { cls: "orange", label: "Disk only" };
+    return { cls: "red", label: "Missing" };
+  }
   async function refreshSidebarVariableList() {
     const listEl = document.getElementById("sidebar-variable-list");
     const emptyEl = document.getElementById("sidebar-variable-empty");
@@ -1678,20 +2095,188 @@
       const res = await fetch("/api/data-vars");
       const data = await res.json().catch(() => ({}));
       const variables = Array.isArray(data.variables) ? data.variables : [];
+      const ids = new Set(variables.map((v) => (v.id || "").trim()));
       listEl.querySelectorAll(".sidebar-variable-item").forEach((el) => el.remove());
       if (emptyEl) emptyEl.style.display = variables.length > 0 ? "none" : "list-item";
       variables.forEach((v) => {
+        const varId = (v.id || "").trim();
+        if (!varId) return;
         const li = document.createElement("li");
-        li.className = "sidebar-variable-item";
+        li.className = "sidebar-variable-item sidebar-variable-type-" + ((v.type || "data").toLowerCase());
+        li.dataset.varId = varId;
         const name = (v.name || "").trim() || "—";
-        li.innerHTML = '<span class="sidebar-variable-name" title="' + escapeHtml(name) + '">' + escapeHtml(name) + "</span>";
+        const info = variableTypeInfo(v.type);
+        const tooltip = "? " + info.label + " — " + info.hint;
+        const memLabel = v.has_gpu ? "GPU" : "MEM";
+        const memIsLoaded = v.has_gpu ? true : !!v.has_ram;
+        const memStatus = memIsLoaded ? "ok" : "bad";
+        const hdStatus = v.has_disk ? "ok" : "bad";
+        li.title = tooltip;
+        li.innerHTML =
+          '<span class="sidebar-variable-status-group">' +
+            '<span class="sidebar-variable-status-label">' + escapeHtml(memLabel) + '</span>' +
+            '<span class="sidebar-variable-status sidebar-variable-status-' + memStatus + '" title="' + escapeHtml(memLabel) + ': ' + (memIsLoaded ? "Loaded" : "Unloaded") + '"></span>' +
+            '<span class="sidebar-variable-status-label">HD</span>' +
+            '<span class="sidebar-variable-status sidebar-variable-status-' + hdStatus + '" title="HD: ' + (v.has_disk ? "Present" : "Missing") + '"></span>' +
+          '</span>' +
+          '<span class="sidebar-variable-icon" aria-hidden="true" title="' + escapeHtml(tooltip) + '">' + escapeHtml(info.icon) + '</span>' +
+          '<span class="sidebar-variable-name" title="' + escapeHtml(name) + '">' + escapeHtml(name) + "</span>";
+        li.addEventListener("click", () => {
+          activeVariableId = varId;
+          activeVariableName = name;
+          highlightSelectedVariable(activeVariableId);
+          setVariablePanelVisible(true);
+          refreshVariableDetail();
+        });
         listEl.appendChild(li);
       });
+      if (activeVariableId && !ids.has(activeVariableId)) {
+        activeVariableId = null;
+        activeVariableName = null;
+        setVariablePanelEmpty();
+        setVariablePanelVisible(false);
+      }
+      if (activeVariableId) highlightSelectedVariable(activeVariableId);
     } catch (_) {
       if (emptyEl) emptyEl.style.display = "list-item";
     }
   }
   window.refreshSidebarVariableList = refreshSidebarVariableList;
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => refreshSidebarVariableList());
+  } else {
+    refreshSidebarVariableList();
+  }
+
+  if (variablePanelClose) {
+    variablePanelClose.addEventListener("click", () => {
+      activeVariableId = null;
+      activeVariableName = null;
+      highlightSelectedVariable(null);
+      setVariablePanelVisible(false);
+      setVariablePanelEmpty();
+    });
+  }
+  if (variablePanelLoad) {
+    variablePanelLoad.addEventListener("click", async () => {
+      if (!activeVariableId) return;
+      setVariablePanelStatus("Loading...");
+      try {
+        const res = await fetch(
+          "/api/data-vars/" + encodeURIComponent(activeVariableId) + "/load",
+          { method: "POST" }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || "Failed");
+        setVariablePanelStatus("Loaded into memory.");
+        if (typeof window.refreshSidebarVariableList === "function") window.refreshSidebarVariableList();
+        refreshVariableDetail();
+      } catch (e) {
+        setVariablePanelStatus("Load failed.");
+        showStatusToast("Load failed: " + (e.message || "Unknown error"), "error");
+      }
+    });
+  }
+  if (variablePanelUnload) {
+    variablePanelUnload.addEventListener("click", async () => {
+      if (!activeVariableId) return;
+      if (!confirm("Unload this variable from memory?")) return;
+      setVariablePanelStatus("Unloading...");
+      try {
+        await fetch(
+          "/api/data-vars/" + encodeURIComponent(activeVariableId) + "/unload",
+          { method: "POST" }
+        );
+        setVariablePanelStatus("Unloaded.");
+        if (typeof window.refreshSidebarVariableList === "function") window.refreshSidebarVariableList();
+        refreshVariableDetail();
+      } catch (e) {
+        setVariablePanelStatus("Unload failed.");
+      }
+    });
+  }
+  if (variablePanelDelete) {
+    variablePanelDelete.addEventListener("click", async () => {
+      if (!activeVariableId) return;
+      if (!confirm("Delete this variable from disk?")) return;
+      try {
+        const res = await fetch(
+          "/api/data-vars/" + encodeURIComponent(activeVariableId),
+          { method: "DELETE" }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || "Failed");
+        activeVariableId = null;
+        activeVariableName = null;
+        setVariablePanelEmpty();
+        setVariablePanelVisible(false);
+        if (typeof window.refreshSidebarVariableList === "function") window.refreshSidebarVariableList();
+        if (typeof window.refreshWorkingMemoryList === "function") window.refreshWorkingMemoryList();
+      } catch (e) {
+        setVariablePanelStatus("Delete failed.");
+      }
+    });
+  }
+  if (variablePanelRename) {
+    variablePanelRename.addEventListener("click", async () => {
+      if (!activeVariableId || !variablePanelRenameInput) return;
+      const newName = variablePanelRenameInput.value.trim();
+      if (!newName) {
+        setVariablePanelStatus("New name required.");
+        return;
+      }
+      try {
+        const res = await fetch(
+          "/api/data-vars/" + encodeURIComponent(activeVariableId) + "/rename",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ new_name: newName }),
+          }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || "Failed");
+        activeVariableName = data.new_name || newName;
+        variablePanelRenameInput.value = "";
+        setVariablePanelStatus("Renamed.");
+        if (typeof window.refreshSidebarVariableList === "function") window.refreshSidebarVariableList();
+        refreshVariableDetail();
+      } catch (e) {
+        setVariablePanelStatus("Rename failed.");
+      }
+    });
+  }
+
+  if (el.sidebarModel) {
+    el.sidebarModel.addEventListener("focus", () => {
+      toggleModelPicker(true);
+      filterModelPicker(el.sidebarModel.value);
+    });
+    el.sidebarModel.addEventListener("input", () => {
+      toggleModelPicker(true);
+      filterModelPicker(el.sidebarModel.value);
+    });
+  }
+  if (modelPickerList) {
+    modelPickerList.addEventListener("click", (e) => {
+      const item = e.target.closest(".sidebar-picker-item");
+      if (!item || !el.sidebarModel) return;
+      el.sidebarModel.value = item.dataset.value || "";
+      toggleModelPicker(false);
+    });
+  }
+  document.addEventListener("click", (e) => {
+    if (!modelPicker) return;
+    if (e.target.closest("#model-picker") || e.target === el.sidebarModel) return;
+    toggleModelPicker(false);
+  });
+
+  const conversationClearBtn = document.getElementById("btn-clear-cache");
+  if (conversationClearBtn) {
+    conversationClearBtn.addEventListener("click", () => {
+      clearChatClosedFlag(window.PNP_CURRENT_TASK_ID || "");
+    });
+  }
 
   // ----- Init -----
   async function init() {
@@ -1725,16 +2310,17 @@
         const option = document.querySelector(`.create-task-option[data-level="${createLevel}"]`);
         showCreateTaskModal(createLevel, "");
       }
-      // 0.1.1 Completion / 0.1.2 Conversation / 1.0.1 Response Attribution / 2.0.1 Residual Concept: open Input Setting panel
-      if ((window.PNP_CURRENT_TASK_LEVEL === "0.1.1" || window.PNP_CURRENT_TASK_LEVEL === "0.1.2" || window.PNP_CURRENT_TASK_LEVEL === "1.0.1" || window.PNP_CURRENT_TASK_LEVEL === "2.0.1") && el.inputSettingPanel) {
-        el.inputSettingPanel.classList.add("visible");
-        el.inputSettingTrigger?.classList.add("has-setting");
+      if (el.inputSettingPanel) {
+        el.inputSettingPanel.classList.remove("visible");
+        el.inputSettingTrigger?.classList.remove("has-setting");
       }
+      maybeAppendChatClosed();
       if (el.resultsContent && el.resultsContent.querySelector(".results-attribution-wrap")) {
         if (window.PNP_initAttributionGradientControls) window.PNP_initAttributionGradientControls(el.resultsContent);
       }
     } catch (e) {
       console.error("Init error:", e);
+      refreshSidebarVariableList();
     }
   }
 

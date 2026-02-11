@@ -1,23 +1,20 @@
 """
 Cache store: Python Cache (Alive & Terminated).
 
-- session: loaded_model, treatment (서버 세션, persisted to disk)
+- session: loaded_model, treatment (in-memory only; not persisted).
 - generic namespace cache: put/get/delete (공통 캐시, namespace로 구분)
 - 사용처에서 반드시 namespace를 지정하여 위치 등록 후 사용
+- Session is cleared when user leaves (switches to another task panel). Not restored on restart.
 """
 
-import json
-from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-SESSION_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "session.json"
 
 
 class CacheStore:
     """
     공통 세션 캐시. 모든 테스크가 동일하게 사용.
     Lifecycle: alive (in cache) / terminated (cleared).
-    Session is persisted to data/session.json.
+    Session is in-memory only; not persisted to disk.
     """
 
     def __init__(self) -> None:
@@ -26,33 +23,6 @@ class CacheStore:
             "treatment": None,
         }
         self._cache: Dict[str, Dict[str, Any]] = {}  # namespace -> {key -> value}
-        self._load_session()
-
-    def _load_session(self) -> None:
-        if not SESSION_FILE.exists():
-            return
-        try:
-            with open(SESSION_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                if "loaded_model" in data:
-                    self._session["loaded_model"] = data.get("loaded_model")
-                if "treatment" in data:
-                    self._session["treatment"] = data.get("treatment") or ""
-        except (json.JSONDecodeError, IOError):
-            pass
-
-    def _save_session(self) -> None:
-        SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(SESSION_FILE, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"loaded_model": self._session["loaded_model"], "treatment": self._session["treatment"]},
-                    f,
-                    indent=2,
-                )
-        except IOError:
-            pass
 
     # ----- Session (loaded_model, treatment) -----
 
@@ -62,7 +32,6 @@ class CacheStore:
     def set_session(self, loaded_model: Optional[str], treatment: str = "") -> None:
         self._session["loaded_model"] = loaded_model
         self._session["treatment"] = treatment
-        self._save_session()
 
     # ----- Generic namespace cache -----
 
@@ -109,12 +78,15 @@ class CacheStore:
             })
         return items
 
+    def get_namespace(self, namespace: str) -> Dict[str, Any]:
+        """Return the entire namespace map (live reference)."""
+        return self._cache.get(namespace, {})
+
     def terminate_all(self) -> None:
         """전체 초기화: session + 모든 namespace cache."""
         self._session["loaded_model"] = None
         self._session["treatment"] = None
         self._cache.clear()
-        self._save_session()
 
 
 cache_store = CacheStore()

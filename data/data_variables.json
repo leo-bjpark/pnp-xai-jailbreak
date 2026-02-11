@@ -1,6 +1,7 @@
 {
-  "walledai/XSTest/test/200/100/Test": {
-    "variable_name": "walledai/XSTest/test/200/100/Test",
+  "var_20260211_133956_112585": {
+    "uid": "var_20260211_133956_112585",
+    "nickname": "walledai/XSTest/test/200/100/Test",
     "pipeline_id": "pipe_20260209_215428_0",
     "task_name": "Test",
     "data_name": "walledai/XSTest",
@@ -751,7 +752,7 @@
       "random_n": 200,
       "seed": 100
     },
-    "created_at": "2026-02-09T21:54:43.694195",
+    "created_at": "2026-02-11T13:39:56.193541",
     "type": "data"
   }
 }

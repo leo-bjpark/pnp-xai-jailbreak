@@ -1,5 +1,7 @@
 {
-  "residual/Res/google/gemma-3-270m-it/72x640": {
+  "res_20260211_134223_842473": {
+    "uid": "res_20260211_134223_842473",
+    "nickname": "residual/Res/google/gemma-3-270m-it/72x640",
     "directions": {
       "model.layers.0.attn_out": [
         -0.5452204942703247,
@@ -46230,6 +46232,6 @@
     "model": "google/gemma-3-270m-it",
     "num_keys": 72,
     "model_dim": 640,
-    "created_at": "2026-02-09T21:55:46.391483"
+    "created_at": "2026-02-11T13:42:23.051499"
   }
 }

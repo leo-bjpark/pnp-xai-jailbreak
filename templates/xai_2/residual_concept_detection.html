@@ -146,13 +146,18 @@
         variableSelect.innerHTML = '<option value="">— Select saved variable —</option>';
         variables.forEach(function(v) {
           var opt = document.createElement("option");
-          opt.value = v.name || "";
-          opt.textContent = (v.name || "") + (v.task_name ? " (" + v.task_name + ")" : "");
+          opt.value = v.id || "";
+          opt.textContent = (v.name || v.id || "") + (v.task_name ? " (" + v.task_name + ")" : "");
+          opt.dataset.nickname = v.name || "";
           variableSelect.appendChild(opt);
         });
-        var saved = {{ (task.result or {}).get('variable_name', '') | tojson }};
-        if (saved && variableSelect.querySelector('option[value="' + String(saved).replace(/"/g, '&quot;') + '"]')) {
-          variableSelect.value = saved;
+        var savedId = {{ (task.result or {}).get('variable_id', '') | tojson }};
+        var savedName = {{ (task.result or {}).get('variable_name', '') | tojson }};
+        if (savedId && variableSelect.querySelector('option[value="' + String(savedId).replace(/"/g, '&quot;') + '"]')) {
+          variableSelect.value = savedId;
+        } else if (savedName) {
+          var match = variables.find(function(v) { return v.name === savedName; });
+          if (match && match.id) variableSelect.value = match.id;
         }
       }).catch(function() {});
     }

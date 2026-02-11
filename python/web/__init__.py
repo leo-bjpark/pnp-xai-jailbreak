@@ -30,6 +30,8 @@ def create_app() -> Flask:
     from .api_memory import memory_bp
     from .api_dataset import dataset_bp
     from .api_residual import residual_bp
+    from .api_brain import brain_bp
+    from .api_theme import theme_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(tasks_bp)
@@ -39,6 +41,7 @@ def create_app() -> Flask:
     app.register_blueprint(memory_bp)
     app.register_blueprint(dataset_bp)
     app.register_blueprint(residual_bp)
+    app.register_blueprint(brain_bp)
+    app.register_blueprint(theme_bp)
 
     return app
-

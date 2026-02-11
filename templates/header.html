@@ -2,66 +2,18 @@
 <header class="app-title-bar">
   <div class="app-title-bar-left">
     <h1>PnP-XAI-LLM</h1>
+    <div class="app-title-bar-meta">
+      <span>Version 0.1</span>
+      <span>(c) KAIST-SAIL</span>
+    </div>
   </div>
   <div class="app-title-bar-center">
-    <div class="memory-clear-btns">
-      <div class="memory-panel-wrap">
-        <button type="button" class="btn-memory-clear btn-clear-session" id="btn-clear-session" title="Session · 목록 보기 · 개별 삭제">
-          <span class="btn-memory-icon">🧵</span>
-          <span class="btn-memory-label">Session</span>
-        </button>
-        <div class="memory-dropdown" id="session-dropdown" aria-hidden="true">
-          <div class="data-vars-dropdown-header">Session · Task | model | treatment | 이름 (Cache)</div>
-          <div class="data-vars-table-wrap">
-            <table class="data-vars-table">
-              <thead><tr><th class="data-vars-th-name">Task | model | treatment | 이름</th><th class="data-vars-th-action"></th></tr></thead>
-              <tbody id="session-tbody">
-                <tr class="data-vars-empty-row" id="session-empty-row"><td colspan="2">No caches.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div class="memory-panel-wrap">
-        <button type="button" class="btn-memory-clear btn-clear-result" id="btn-clear-result" title="결과 · 목록 보기 · 개별 삭제">
-          <span class="btn-memory-icon">📄</span>
-          <span class="btn-memory-label">Results</span>
-        </button>
-        <div class="memory-dropdown" id="result-dropdown" aria-hidden="true">
-          <div class="data-vars-dropdown-header">결과 · Task list</div>
-          <div class="data-vars-table-wrap">
-            <table class="data-vars-table">
-              <thead><tr><th class="data-vars-th-name">Name</th><th class="data-vars-th-memory">Model · Level</th><th class="data-vars-th-action"></th></tr></thead>
-              <tbody id="result-tbody">
-                <tr class="data-vars-empty-row" id="result-empty-row"><td colspan="3">No items.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div class="memory-panel-wrap">
-        <button type="button" class="btn-memory-clear btn-clear-variable" id="btn-clear-variable" title="Variables · 목록 보기 · 개별 삭제">
-          <span class="btn-memory-icon">🧊</span>
-          <span class="btn-memory-label">Variables</span>
-        </button>
-        <div class="memory-dropdown data-vars-dropdown" id="data-vars-dropdown" aria-hidden="true">
-          <div class="data-vars-dropdown-header">Variables · Loaded model &amp; saved data</div>
-          <div class="data-vars-table-wrap">
-            <table class="data-vars-table">
-              <thead><tr><th class="data-vars-th-name">Name</th><th class="data-vars-th-memory">Memory (GPU / RAM)</th><th class="data-vars-th-action"></th></tr></thead>
-              <tbody id="data-vars-tbody">
-                <tr class="data-vars-empty-row" id="data-vars-empty-row"><td colspan="3" id="data-vars-empty">No items.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div class="memory-summary-wrap" id="memory-summary-wrap" title="Session | Result | Variable memory (GB)">
-        <span class="memory-summary-label">Session</span><span class="memory-summary-value" id="memory-summary-session">—</span>
-        <span class="memory-summary-sep">|</span>
-        <span class="memory-summary-label">Result</span><span class="memory-summary-value" id="memory-summary-result">—</span>
-        <span class="memory-summary-sep">|</span>
-        <span class="memory-summary-label">Variable</span><span class="memory-summary-value" id="memory-summary-variable">—</span>
+    <div class="app-log-panel" id="app-log-panel" aria-live="polite">
+      <div class="app-log-title">Log</div>
+      <div class="app-log-preview" id="app-log-preview">—</div>
+      <div class="app-log-popover" id="app-log-popover" aria-hidden="true">
+        <div class="app-log-popover-title">Log History</div>
+        <div class="app-log-list" id="app-log-list"></div>
       </div>
     </div>
   </div>
@@ -78,13 +30,30 @@
       </div>
     </div>
     <input type="file" id="import-file-input" accept=".json" hidden />
-    <button type="button" class="theme-toggle" id="theme-toggle" title="Toggle theme (Sun: White, Moon: Black)" aria-label="Toggle theme">
-      <span class="theme-icon theme-sun" aria-hidden="true">☀</span>
-      <span class="theme-icon theme-moon" aria-hidden="true">🌙</span>
-    </button>
-    <div class="app-title-bar-meta">
-      <span>Version 0.1</span>
-      <span>(c) KAIST-SAIL</span>
+    <div class="theme-custom-wrap" id="theme-custom-wrap">
+      <button type="button" class="theme-toggle" id="theme-toggle" title="Toggle theme (Sun: White, Moon: Black)" aria-label="Toggle theme">
+        <span class="theme-icon theme-sun" aria-hidden="true">☀</span>
+        <span class="theme-icon theme-moon" aria-hidden="true">🌙</span>
+      </button>
+      <div class="theme-custom-panel" id="theme-custom-panel" aria-hidden="true">
+        <div class="theme-custom-actions">
+          <button type="button" class="theme-custom-reset" id="theme-custom-reset">Set to Default</button>
+          <button type="button" class="theme-custom-update" id="theme-custom-update">Apply</button>
+        </div>
+        <div class="theme-custom-header">
+          <span>Element</span>
+          <span>Color</span>
+        </div>
+        <div class="theme-custom-row"><span>Background</span><input type="color" data-var="--bg" /></div>
+        <div class="theme-custom-row"><span>Panel</span><input type="color" data-var="--panel" /></div>
+        <div class="theme-custom-row"><span>Sidebar</span><input type="color" data-var="--sidebar" /></div>
+        <div class="theme-custom-row"><span>Text</span><input type="color" data-var="--text" /></div>
+        <div class="theme-custom-row"><span>Muted</span><input type="color" data-var="--muted" /></div>
+        <div class="theme-custom-row"><span>Border</span><input type="color" data-var="--border" /></div>
+        <div class="theme-custom-row"><span>Brand</span><input type="color" data-var="--brand" /></div>
+        <div class="theme-custom-row"><span>Accent</span><input type="color" data-var="--accent" /></div>
+        <div class="theme-custom-row"><span>Hover</span><input type="color" data-var="--hover" /></div>
+      </div>
     </div>
   </div>
   <script>
@@ -109,4 +78,5 @@
     else initVariableBtn();
   })();
   </script>
+  <div class="status-toast" id="status-toast" aria-live="polite" aria-hidden="true"></div>
 </header>

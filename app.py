@@ -22,7 +22,7 @@ app: Flask = create_app()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5002, debug=True)
 
 """
 PnP-XAI-LLM - VSCode-like XAI analysis tool.
@@ -105,6 +105,8 @@ def _task_template(level_key: str) -> str:
         return "xai_2/residual_concept_detection.html"
     if level_key == "2.0.2":
         return "xai_2/layer_direction_similarity.html"
+    if level_key == "2.1.0":
+        return "xai_2/brain_concept.html"
     return "xai_2/not_implemented.html"
 
 
@@ -268,11 +270,35 @@ def api_set_session():
     return jsonify({"status": "ok"})
 
 
+@app.post("/api/session/leave")
+def api_session_leave():
+    """Leave current task: clear only task-associated caches (session namespace). Keeps loaded_model and treatment."""
+    cache_store.clear_namespace("session")
+    return jsonify({"status": "ok"})
+
+
+@app.post("/api/transformer_cache/clear")
+def api_transformer_cache_clear():
+    """Clear transformer cache (model + CUDA) while preserving treatment."""
+    clear_model_cache()
+    sess = cache_store.get_session()
+    cache_store.set_session(None, sess.get("treatment") or "")
+    return jsonify({"status": "ok"})
+
+
 # ----- API: Models -----
 
 @app.get("/api/models")
 def api_models():
     return jsonify({"models": get_config_models()})
+
+
+@app.get("/api/brain-config")
+def api_brain_config():
+    """Return brain concept map nodes from brain.yaml for Brain Concept Visualization (2.1.0)."""
+    from python.brain_config import load_brain_nodes
+    nodes = load_brain_nodes()
+    return jsonify({"nodes": nodes})
 
 
 @app.post("/api/load_model")
@@ -1094,6 +1120,61 @@ def api_list_data_vars():
     """List loaded model (with GPU/RAM) and saved working‑memory variables."""
     loaded = cache_store.get_session().get("loaded_model")
     payload = summarize_for_panel(loaded_model_key=loaded)
+    loaded_map = cache_store.get_namespace("variable_loaded")
+    loaded_names = set(loaded_map.keys()) if isinstance(loaded_map, dict) else set()
+
+    variables = []
+    seen_names = set()
+    for v in payload.get("variables", []):
+        name = (v.get("name") or "").strip()
+        if not name:
+            continue
+        has_ram = name in loaded_names
+        has_pickle = variable_store.has_pickle(name)
+        has_disk = has_pickle
+        if has_ram and has_disk:
+            status = "ram_and_disk"
+            status_label = "RAM + Disk"
+        elif has_ram and not has_disk:
+            status = "ram_only"
+            status_label = "RAM only"
+        elif not has_ram and has_disk:
+            status = "disk_only"
+            status_label = "Disk only"
+        else:
+            status = "missing"
+            status_label = "Missing"
+        v.update(
+            {
+                "has_ram": has_ram,
+                "has_disk": has_disk,
+                "has_pickle": has_pickle,
+                "status": status,
+                "status_label": status_label,
+            }
+        )
+        variables.append(v)
+        seen_names.add(name)
+
+    if isinstance(loaded_map, dict):
+        for name, entry in loaded_map.items():
+            if name in seen_names:
+                continue
+            payload_type = (entry or {}).get("type") if isinstance(entry, dict) else None
+            variables.append(
+                {
+                    "name": name,
+                    "type": payload_type or "data",
+                    "created_at": (entry or {}).get("loaded_at", "") if isinstance(entry, dict) else "",
+                    "memory_ram_mb": None,
+                    "has_ram": True,
+                    "has_disk": False,
+                    "status": "ram_only",
+                    "status_label": "RAM only",
+                }
+            )
+
+    payload["variables"] = variables
     return jsonify(payload)
 
 
@@ -1102,6 +1183,9 @@ def api_delete_data_var(var_name: str):
     """Remove a working‑memory variable by name (URL‑decoded)."""
     if not wm_delete_variable(var_name):
         return jsonify({"error": "Variable not found"}), 404
+    variable_store.delete_pickle(var_name)
+    if cache_store.get("variable_loaded", var_name) is not None:
+        cache_store.delete("variable_loaded", var_name)
     return jsonify({"status": "ok"})
 
 
@@ -1135,7 +1219,34 @@ def api_save_data_var():
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    return jsonify({"status": "ok", "variable_name": var_name})
+    pickle_saved = False
+    loaded = False
+    try:
+        from python.web.dataset_utils import load_pipeline_dataset, get_process_function
+
+        ds, requested_split = load_pipeline_dataset(pipeline)
+        code = (pipeline.get("processing_code") or "").strip()
+        if pipeline.get("status") == "processed" and code:
+            process_fn = get_process_function(code)
+            ds = ds.map(process_fn, batched=False, remove_columns=None, desc="Processing")
+        payload = {"type": "data", "dataset": ds, "split": requested_split}
+        pickle_saved = variable_store.save_pickle(var_name, payload)
+        if pickle_saved:
+            cache_store.put(
+                "variable_loaded",
+                var_name,
+                {
+                    "type": "data",
+                    "dataset": ds,
+                    "requested_split": requested_split,
+                    "loaded_at": datetime.now().isoformat(),
+                    "object_name": type(ds).__name__,
+                },
+            )
+            loaded = True
+    except Exception:
+        pickle_saved = False
+    return jsonify({"status": "ok", "variable_name": var_name, "pickle_saved": pickle_saved, "loaded": loaded})
 
 
 @app.get("/api/residual-vars/<path:var_name>")
@@ -1178,7 +1289,16 @@ def api_save_residual_var():
         )
     except (ValueError, TypeError) as exc:
         return jsonify({"error": str(exc)}), 400
-    return jsonify({"status": "ok", "variable_name": var_name})
+    payload = {
+        "directions": directions,
+        "task_name": task_name,
+        "model": model,
+        "num_keys": int(num_keys),
+        "model_dim": int(model_dim or 0),
+        "created_at": datetime.now().isoformat(),
+    }
+    pickle_saved = variable_store.save_pickle(var_name, payload)
+    return jsonify({"status": "ok", "variable_name": var_name, "pickle_saved": pickle_saved})
 
 
 if __name__ == "__main__":

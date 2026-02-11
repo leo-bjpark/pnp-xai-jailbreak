@@ -24,22 +24,35 @@ llms:
     - microsoft/Phi-3-medium-4k-instruct
 
 XAI_LEVEL_NAMES:
-  - "0.1.1": "Completion"
-  - "0.1.2": "Conversation"
-  - "0.2.1": "Binary Classification" 
-  - "0.2.2": "Multiclass Classification"
-  - "0.2.3": "Regression"
-  - "0.2.4": "Jailbreak"
-  - "0.2.5": "Positive and Negative Response Preference"
-  - "1.0.1": "Response Attribution"
-  - "1.0.1": "Positive & Negative Attribution"
-  - "2.0.1": "Residual Concept Detection"
-  - "2.0.2": "Layer Direction Similarity Analysis"
+  - "LEVEL_0": 
+    - "Completion"
+    - "Conversation"
+    - "Regression"
+    - "Binary Classification" 
+    - "Multiclass Classification"
+    - "Jailbreak"
+  - "LEVEL_1":
+    - "Response Attribution"
+    - "Positive & Negative Attribution"
+  - "LEVEL_2":
+    - "Layer Direction Similarity Analysis"
+    - "Brain Concept Visualization"
+    - "Positive and Negative Response Preference"
 
 TREATMENTS:
   - "Simple Steering"
 
 
 DATASETS:
-  - jailbreak:
+  jailbreak:
     - walledai/XSTest
+    - walledai/JailbreakBench
+    - PKU-Alignment/BeaverTails
+    - Anthropic/hh-rlhf
+  factual:
+    - m-a-p/CounterFact
+    - truthful_qa
+    - felixzhao/NQ-Swap
+  reasoning:
+    - google/BIG-bench
+    - TIGER-Lab/StrategyQA

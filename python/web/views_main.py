@@ -1,12 +1,21 @@
 from flask import Blueprint, redirect, render_template
 
-from python.config_loader import get_xai_level_names, get_xai_level_names_grouped
+from python.config_loader import get_dataset_groups, get_xai_level_names, get_xai_level_names_grouped
 from python.dataset_pipeline_store import get_pipeline_by_id, get_pipelines
 from python.model_load import get_config_models, get_config_models_grouped
 from python.session_store import get_task_by_id, get_tasks
 
 
 main_bp = Blueprint("main", __name__)
+
+
+def _dataset_category_map():
+    groups = get_dataset_groups()
+    mapping = {}
+    for group, items in (groups or {}).items():
+        for item in items:
+            mapping[item] = group
+    return mapping
 
 
 @main_bp.get("/panel")
@@ -32,6 +41,7 @@ def index():
         xai_level_names=xai_level_names,
         xai_level_grouped=xai_level_grouped,
         dataset_pipelines=dataset_pipelines,
+        dataset_categories=_dataset_category_map(),
     )
 
 
@@ -47,6 +57,8 @@ def _task_template(level_key: str) -> str:
         return "xai_2/residual_concept_detection.html"
     if level_key == "2.0.2":
         return "xai_2/layer_direction_similarity.html"
+    if level_key == "2.1.0":
+        return "xai_2/brain_concept.html"
     return "xai_2/not_implemented.html"
 
 
@@ -81,6 +93,7 @@ def _render_task(task_id: str, level_key: str):
         xai_level_names=xai_level_names,
         xai_level_grouped=get_xai_level_names_grouped(),
         dataset_pipelines=dataset_pipelines,
+        dataset_categories=_dataset_category_map(),
     )
 
 
@@ -153,5 +166,6 @@ def data_pipeline_view(pipeline_id: str):
         xai_level_names=xai_level_names,
         xai_level_grouped=get_xai_level_names_grouped(),
         dataset_pipelines=dataset_pipelines,
+        dataset_groups=get_dataset_groups(),
+        dataset_categories=_dataset_category_map(),
     )
-
