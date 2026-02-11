@@ -938,7 +938,7 @@
   function positionCreateTaskPicker() {
     if (!el.createTaskPicker || !el.createTaskInput) return;
     const rect = el.createTaskInput.getBoundingClientRect();
-    const minWidth = 520;
+    const minWidth = 720;
     const desiredWidth = Math.max(rect.width, minWidth);
     const maxLeft = window.innerWidth - desiredWidth - 12;
     const left = Math.max(12, Math.min(rect.left, maxLeft));

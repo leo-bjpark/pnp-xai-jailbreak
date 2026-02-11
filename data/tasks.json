@@ -46274,5 +46274,16 @@
   ],
   "xai_level_0_1_1": [],
   "xai_level_0_1_2": [],
-  "xai_level_2_1_0": []
+  "xai_level_2_1_0": [],
+  "xai_level_1_0_1": [
+    {
+      "id": "task_20260211_144235_0",
+      "title": "Response Attribution",
+      "model": "",
+      "treatment": "",
+      "result": {},
+      "created_at": "2026-02-11T14:42:35.022376",
+      "xai_level": "1.0.1"
+    }
+  ]
 }
